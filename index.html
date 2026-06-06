@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emergency Connect - Rescue & Resource Sharing Platform</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <!-- Local Custom CSS -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ==========================================================================
+       Header Navigation Bar
+       ========================================================================== -->
+  <header class="header-nav flex align-center">
+    <div class="container nav-container flex align-center justify-between" style="width: 100%;">
+      <a href="#home" class="logo">
+        <i data-lucide="shield-alert" class="logo-icon"></i>
+        <div class="logo-text">Emergency<span>Connect</span></div>
+      </a>
+      
+      <nav>
+        <ul class="nav-links flex">
+          <li><a href="#home" class="active">Home</a></li>
+          <li><a href="#dashboard">Dashboard</a></li>
+          <li><a href="#resources">Resources</a></li>
+          <li><a href="#blood">Blood Registry</a></li>
+          <li><a href="#volunteers">Volunteers</a></li>
+          <li><a href="#admin" id="admin-nav-link" style="display: none;">Admin Console</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-actions flex align-center">
+        <!-- Theme Toggle -->
+        <button id="theme-toggle-btn" class="btn-icon-only" title="Toggle Light/Dark Mode">
+          <i data-lucide="moon"></i>
+        </button>
+
+        <!-- Notification Bell -->
+        <button class="btn-icon-only" title="Emergency Notifications" style="position: relative;" onclick="window.location.hash='#dashboard'">
+          <i data-lucide="bell"></i>
+          <span class="notification-dot"></span>
+        </button>
+
+        <!-- Auth Actions / User Menu -->
+        <div id="nav-guest-container">
+          <button id="user-menu-btn" class="btn btn-secondary">
+            <i data-lucide="user"></i> Sign In
+          </button>
+        </div>
+
+        <div id="nav-user-container" style="display: none;" class="align-center gap-md">
+          <div class="user-profile-btn" id="logout-btn" title="Click to Sign Out">
+            <div class="user-avatar" id="user-initials-avatar">SD</div>
+            <span id="user-name-display" style="font-size: 14px; font-weight: 600;">Saurabh</span>
+            <i data-lucide="log-out" style="width: 14px; height: 14px; color: var(--text-muted);"></i>
+          </div>
+        </div>
+
+        <!-- SOS Trigger -->
+        <button class="btn btn-sos trigger-sos-btn">
+          <i data-lucide="alert-octagon"></i> SOS
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Real-Time Toast Notification Wrapper -->
+  <div id="toast-wrapper" class="toast-container"></div>
+
+  <!-- ==========================================================================
+       Main Router Views
+       ========================================================================== -->
+  <main class="main-content">
+
+    <!-- 1. HOME LANDING VIEW -->
+    <section id="home-page" class="page-view active">
+      <!-- Hero Section -->
+      <div class="hero-section">
+        <div class="container grid hero-grid gap-xl">
+          <div>
+            <span class="section-badge badge-danger-soft">COMMUNITY RELIEF INCIDENT NETWORK</span>
+            <h1 class="hero-title">
+              Saving Lives Through <br>
+              <span class="highlight-red">Immediate Connection</span> & <br>
+              <span class="highlight-blue">Resource Mapping</span>
+            </h1>
+            <p class="hero-description">
+              Emergency Connect is a secure, real-time crisis coordination platform that connects stranded citizens, hospitals, and local communities directly with volunteers, blood donors, and disaster resources.
+            </p>
+            <div class="hero-cta flex">
+              <button class="btn btn-danger trigger-sos-btn" style="padding: 16px 28px; font-size: 16px;">
+                <i data-lucide="alert-triangle"></i> BroadCast SOS Alert
+              </button>
+              <button class="btn btn-primary open-add-resource-btn" data-type="request" style="padding: 16px 28px; font-size: 16px;">
+                Request Resources
+              </button>
+              <button class="btn btn-success open-add-resource-btn" data-type="offer" style="padding: 16px 28px; font-size: 16px;">
+                Offer Assistance
+              </button>
+            </div>
+          </div>
+          
+          <div class="hero-visual">
+            <div class="visual-circle-glow"></div>
+            <div class="visual-dashboard-preview glass-card" style="padding: 20px; border-radius: var(--radius-lg);">
+              <div class="flex align-center justify-between" style="border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 16px;">
+                <span style="font-weight: 700; font-size: 14px;" class="flex align-center gap-sm">
+                  <span style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--color-danger); display: inline-block;"></span>
+                  LIVE NODE TRACKING
+                </span>
+                <span class="badge badge-low" style="background-color: var(--bg-card-hover);">San Francisco</span>
+              </div>
+              <div style="height: 200px; background-color: var(--bg-app); border-radius: var(--radius-md); overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; border: 1px solid var(--border-color);">
+                <i data-lucide="map" style="width: 48px; height: 48px; color: var(--text-muted); opacity: 0.5;"></i>
+                <div style="position: absolute; top: 30px; left: 100px; padding: 4px 8px; border-radius: 6px; font-size: 10px; background-color: var(--color-danger); color: white; font-weight: 700; box-shadow: 0 4px 10px rgba(239, 68, 68, 0.4);" class="flex align-center gap-sm">
+                  <i data-lucide="alert-circle" style="width: 10px; height: 10px;"></i> Stranded Citizen
+                </div>
+                <div style="position: absolute; bottom: 40px; right: 80px; padding: 4px 8px; border-radius: 6px; font-size: 10px; background-color: var(--color-success); color: white; font-weight: 700; box-shadow: 0 4px 10px rgba(16, 185, 129, 0.4);" class="flex align-center gap-sm">
+                  <i data-lucide="truck" style="width: 10px; height: 10px;"></i> Food & Meds
+                </div>
+              </div>
+              <div style="margin-top: 16px; font-size: 12px; color: var(--text-muted);" class="flex justify-between">
+                <span>Active Incidents: 43</span>
+                <span>Active Rescuers: 87</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Stats Panel -->
+      <div class="container" style="margin-top: -60px; z-index: 10; position: relative;">
+        <div class="grid live-stats">
+          <div class="stat-card">
+            <div class="stat-icon red"><i data-lucide="alert-circle"></i></div>
+            <div>
+              <div class="stat-number" id="stat-active-req">43</div>
+              <div class="stat-label">Active Requests</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon green"><i data-lucide="check-square"></i></div>
+            <div>
+              <div class="stat-number" id="stat-res-avail">128</div>
+              <div class="stat-label">Resources Available</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon blue"><i data-lucide="users"></i></div>
+            <div>
+              <div class="stat-number" id="stat-vols-online">87</div>
+              <div class="stat-label">Volunteers Registered</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon orange"><i data-lucide="heart"></i></div>
+            <div>
+              <div class="stat-number" id="stat-lives-saved">1,204</div>
+              <div class="stat-label">Fulfillments Logged</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resource Categories -->
+      <div class="section-padding">
+        <div class="container">
+          <div class="section-header">
+            <span class="section-badge badge-primary-soft">RESOURCE INDEX</span>
+            <h2 class="section-title">Essential Crisis Resources</h2>
+            <p class="section-subtitle">Select a category to view active listings, donate supplies, or request volunteer aid.</p>
+          </div>
+          
+          <div class="grid categories-grid">
+            <div class="category-card" onclick="window.location.hash='#blood'">
+              <div class="category-card-icon"><i data-lucide="droplet"></i></div>
+              <h3 class="category-card-title">Blood Donors</h3>
+              <p class="category-card-desc">Connect with verified emergency blood donors mapped by medical group and service range.</p>
+            </div>
+            <div class="category-card" onclick="window.location.hash='#resources'">
+              <div class="category-card-icon"><i data-lucide="pill"></i></div>
+              <h3 class="category-card-title">Medicines</h3>
+              <p class="category-card-desc">Find community pharmaceutical supplies, prescription drops, and clinical aid items.</p>
+            </div>
+            <div class="category-card" onclick="window.location.hash='#resources'">
+              <div class="category-card-icon"><i data-lucide="shopping-bag"></i></div>
+              <h3 class="category-card-title">Food Packets</h3>
+              <p class="category-card-desc">Request or donate freshly prepared meals, infant formula, and drinking water pallets.</p>
+            </div>
+            <div class="category-card" onclick="window.location.hash='#resources'">
+              <div class="category-card-icon"><i data-lucide="truck"></i></div>
+              <h3 class="category-card-title">Emergency Transport</h3>
+              <p class="category-card-desc">Arrange ambulance coordinates, 4x4 offroad trucks, or logistics dispatchers.</p>
+            </div>
+            <div class="category-card" onclick="window.location.hash='#resources'">
+              <div class="category-card-icon"><i data-lucide="home"></i></div>
+              <h3 class="category-card-title">Temporary Shelter</h3>
+              <p class="category-card-desc">Find community halls, storm refuge spaces, hotel listings, or home rooms.</p>
+            </div>
+            <div class="category-card" onclick="window.location.hash='#volunteers'">
+              <div class="category-card-icon"><i data-lucide="user-check"></i></div>
+              <h3 class="category-card-title">Volunteers</h3>
+              <p class="category-card-desc">Connect with first responders, disaster coordinators, translators, and counselors.</p>
+            </div>
+            <div class="category-card" onclick="window.location.hash='#resources'">
+              <div class="category-card-icon"><i data-lucide="activity"></i></div>
+              <h3 class="category-card-title">Medical Equipment</h3>
+              <p class="category-card-desc">Find oxygen cylinders, wheelchairs, crutches, and first-aid kits near you.</p>
+            </div>
+            <div class="category-card" onclick="window.location.hash='#resources'">
+              <div class="category-card-icon"><i data-lucide="database"></i></div>
+              <h3 class="category-card-title">See All Assets</h3>
+              <p class="category-card-desc">Browse our global directory of community aid requests and offers.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Interactive Map Section -->
+      <div class="container section-padding" style="border-top: 1px solid var(--border-color);">
+        <div class="section-header">
+          <span class="section-badge badge-danger-soft">LIVE MONITORING</span>
+          <h2 class="section-title">Emergency Assistance Mesh Map</h2>
+          <p class="section-subtitle">Real-time geospatial representation of distress SOS signals, logistics offers, and volunteer nodes.</p>
+        </div>
+
+        <div class="grid map-section-grid">
+          <!-- Leaflet Map Container -->
+          <div class="map-wrapper">
+            <div id="home-map" class="leaflet-container"></div>
+          </div>
+          
+          <!-- Nearby listings panel -->
+          <div>
+            <h3 style="font-size: 20px; margin-bottom: 20px;" class="flex align-center gap-sm">
+              <i data-lucide="activity" style="color: var(--color-danger);"></i> 
+              Nearby Assistance Directory
+            </h3>
+            <div class="nearby-resources-list" id="nearby-list-container">
+              <!-- Rendered via app.js -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Success Stories Section -->
+      <div class="section-padding" style="background-color: var(--bg-card); border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);">
+        <div class="container">
+          <div class="section-header">
+            <span class="section-badge badge-success-soft">SUCCESS CASES</span>
+            <h2 class="section-title">Response Chronicles</h2>
+            <p class="section-subtitle">See how Emergency Connect is resolving distress signals and coordinating volunteer nodes.</p>
+          </div>
+
+          <div class="grid stories-slider" id="success-stories-container">
+            <!-- Loaded via app.js -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Volunteer Action Banner -->
+      <div class="container section-padding">
+        <div class="volunteer-banner">
+          <h2>Be the Difference When Crisis Strikes</h2>
+          <p>Join our volunteer dispatch mesh network. Leverage your skills in medical care, rescue logistics, food distribution, or crisis translation to save lives.</p>
+          <button class="btn btn-success open-volunteer-modal-btn" style="padding: 16px 36px; font-size: 16px; box-shadow: 0 10px 20px rgba(16, 185, 129, 0.3);">
+            <i data-lucide="user-plus"></i> Register as Volunteer Node
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. EMERGENCY CONSOLE (DASHBOARD) -->
+    <section id="dashboard-page" class="page-view">
+      <div class="container grid dashboard-layout">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="dashboard-sidebar">
+          <div class="sidebar-link active" data-target="dashboard" onclick="window.location.hash='#dashboard'">
+            <i data-lucide="layout-dashboard"></i> Overview
+          </div>
+          <div class="sidebar-link" data-target="resources" onclick="window.location.hash='#resources'">
+            <i data-lucide="database"></i> Aid Directory
+          </div>
+          <div class="sidebar-link" data-target="blood" onclick="window.location.hash='#blood'">
+            <i data-lucide="droplet"></i> Blood Registry
+          </div>
+          <div class="sidebar-link" data-target="volunteers" onclick="window.location.hash='#volunteers'">
+            <i data-lucide="users"></i> Rescuer Network
+          </div>
+          <div class="sidebar-link" data-target="admin" id="sidebar-admin-link" onclick="window.location.hash='#admin'">
+            <i data-lucide="terminal"></i> Admin Console
+          </div>
+        </aside>
+
+        <!-- Main Dashboard Console content -->
+        <div class="dashboard-content-area">
+          <div class="flex justify-between align-center">
+            <div>
+              <h1 style="font-size: 28px; margin-bottom: 4px;">Incident Control Center</h1>
+              <p style="font-size: 14px; color: var(--text-muted);">Real-time dispatch controls, metrics, and listing monitors.</p>
+            </div>
+            <div class="flex gap-sm">
+              <button class="btn btn-danger open-add-resource-btn" data-type="request">
+                <i data-lucide="plus-circle"></i> File Request
+              </button>
+              <button class="btn btn-success open-add-resource-btn" data-type="offer">
+                <i data-lucide="package"></i> Post Offer
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Stats -->
+          <div class="grid db-stats-grid">
+            <div class="glass-card flex align-center justify-between" style="padding: 20px;">
+              <div>
+                <p style="font-size: 13px; color: var(--text-muted); font-weight:700;">ACTIVE UNRESOLVED REQUESTS</p>
+                <h2 style="font-size: 32px; margin-top: 6px; color: var(--color-danger);" id="db-active-req">--</h2>
+              </div>
+              <i data-lucide="alert-circle" style="width: 36px; height: 36px; color: var(--color-danger); opacity:0.6;"></i>
+            </div>
+            <div class="glass-card flex align-center justify-between" style="padding: 20px;">
+              <div>
+                <p style="font-size: 13px; color: var(--text-muted); font-weight:700;">AVAILABLE RESOURCES IN FIELD</p>
+                <h2 style="font-size: 32px; margin-top: 6px; color: var(--color-success);" id="db-avail-res">--</h2>
+              </div>
+              <i data-lucide="package" style="width: 36px; height: 36px; color: var(--color-success); opacity:0.6;"></i>
+            </div>
+            <div class="glass-card flex align-center justify-between" style="padding: 20px;">
+              <div>
+                <p style="font-size: 13px; color: var(--text-muted); font-weight:700;">VOLUNTEER NODES ASSIGNED</p>
+                <h2 style="font-size: 32px; margin-top: 6px; color: var(--color-primary);" id="db-total-vols">--</h2>
+              </div>
+              <i data-lucide="users" style="width: 36px; height: 36px; color: var(--color-primary); opacity:0.6;"></i>
+            </div>
+          </div>
+
+          <!-- Split Map & Feed Grid -->
+          <div class="grid db-grid-split">
+            <!-- Left Side: Live Mini Map monitor -->
+            <div class="glass-card" style="padding: 24px;">
+              <h3 style="font-size: 18px; margin-bottom: 16px;" class="flex align-center gap-sm">
+                <i data-lucide="map" style="color: var(--color-primary);"></i>
+                Live incident monitoring grid
+              </h3>
+              <div class="map-wrapper" style="height: 350px;">
+                <div id="db-mini-map" class="leaflet-container"></div>
+              </div>
+            </div>
+
+            <!-- Right Side: Recent Activity Logs -->
+            <div class="glass-card" style="padding: 24px;">
+              <h3 style="font-size: 18px; margin-bottom: 16px;" class="flex align-center gap-sm">
+                <i data-lucide="activity" style="color: var(--color-warning);"></i>
+                Live Coordination Feed
+              </h3>
+              <div class="scroll-panel" id="db-activity-feed">
+                <!-- Loaded via app.js -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Requests Panel -->
+          <div class="glass-card" style="padding: 24px;">
+            <h3 style="font-size: 18px; margin-bottom: 16px;" class="flex align-center gap-sm">
+              <i data-lucide="alert-triangle" style="color: var(--color-danger);"></i>
+              Critical Requests Roster
+            </h3>
+            <div class="flex flex-column gap-sm" id="db-active-requests-list">
+              <!-- Loaded via app.js -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. RESOURCE DIRECTORY (LISTINGS) -->
+    <section id="resources-page" class="page-view">
+      <div class="container" style="padding: 40px 0;">
+        <div class="flex justify-between align-center" style="margin-bottom: 30px;">
+          <div>
+            <h1 style="font-size: 32px; margin-bottom: 4px;">Public Aid Directory</h1>
+            <p style="font-size: 14px; color: var(--text-muted);">Explore, filter, or coordinate help requests and supply listings.</p>
+          </div>
+          <div class="flex gap-sm">
+            <button class="btn btn-primary open-add-resource-btn" data-type="request">
+              <i data-lucide="plus-circle"></i> Create Request
+            </button>
+            <button class="btn btn-success open-add-resource-btn" data-type="offer">
+              <i data-lucide="package"></i> Create Offer
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters row -->
+        <div class="grid filters-bar">
+          <div class="filter-group">
+            <label class="filter-label">Search Query</label>
+            <input type="text" id="search-resource-input" class="filter-input" placeholder="Search title, locations...">
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Listing Type</label>
+            <select id="filter-type-select" class="filter-input">
+              <option value="all">All Listings</option>
+              <option value="request">Requests Only</option>
+              <option value="offer">Offers Only</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Category</label>
+            <select id="filter-category-select" class="filter-input">
+              <option value="all">All Categories</option>
+              <option value="Blood Donors">Blood Donors</option>
+              <option value="Medicines">Medicines</option>
+              <option value="Food Packets">Food Packets</option>
+              <option value="Emergency Transport">Emergency Transport</option>
+              <option value="Temporary Shelter">Temporary Shelter</option>
+              <option value="Volunteers">Volunteers</option>
+              <option value="Medical Equipment">Medical Equipment</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Urgency Level</label>
+            <select id="filter-urgency-select" class="filter-input">
+              <option value="all">All Urgencies</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary" onclick="document.getElementById('search-resource-input').value=''; document.getElementById('filter-type-select').value='all'; document.getElementById('filter-category-select').value='all'; document.getElementById('filter-urgency-select').value='all'; window.location.hash='#resources'; renderListings();" style="height: 42px;">Clear Filters</button>
+        </div>
+
+        <!-- Directory Grid -->
+        <div class="grid listings-grid" id="listings-grid-container">
+          <!-- Loaded via app.js -->
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. BLOOD DONATION MODULE -->
+    <section id="blood-page" class="page-view">
+      <div class="container" style="padding: 40px 0;">
+        <div class="section-header" style="margin-bottom: 40px;">
+          <span class="section-badge badge-danger-soft">BLOOD REGISTRY</span>
+          <h1 class="section-title">Emergency Blood Bank & Donor Network</h1>
+          <p class="section-subtitle">Real-time mapping of compatible donors. Dial direct numbers to coordinate dispatch.</p>
+        </div>
+
+        <div class="grid blood-module-grid">
+          <!-- Blood group select grid -->
+          <div class="glass-card" style="padding: 30px;">
+            <h3 style="font-size: 18px; margin-bottom: 20px;">Search by Blood Group</h3>
+            <div class="blood-groups-container">
+              <button class="blood-group-selector" data-group="O-">O-</button>
+              <button class="blood-group-selector" data-group="O+">O+</button>
+              <button class="blood-group-selector" data-group="A-">A-</button>
+              <button class="blood-group-selector" data-group="A+">A+</button>
+              <button class="blood-group-selector" data-group="B-">B-</button>
+              <button class="blood-group-selector" data-group="B+">B+</button>
+              <button class="blood-group-selector" data-group="AB-">AB-</button>
+              <button class="blood-group-selector" data-group="AB+">AB+</button>
+            </div>
+            
+            <div style="border-top: 1px solid var(--border-color); padding-top: 24px; margin-top: 24px;">
+              <h4 style="font-size: 16px; margin-bottom: 12px;">Compatibility Warning</h4>
+              <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px;">
+                <strong>O-Negative</strong> is the universal donor group. In cases of extreme hemorrhage or accident trauma, O- blood can be administered immediately while clinical matching takes place.
+              </p>
+              <button class="btn btn-danger open-add-resource-btn" data-type="request" style="width: 100%;">
+                <i data-lucide="plus-circle"></i> File Urgent Blood Request
+              </button>
+            </div>
+          </div>
+
+          <!-- Matching Donors list -->
+          <div class="glass-card" style="padding: 30px;">
+            <h3 style="font-size: 18px; margin-bottom: 20px;" class="flex align-center gap-sm">
+              <i data-lucide="heart" style="color: var(--color-danger);"></i>
+              Matching Verified Donors (San Francisco)
+            </h3>
+            
+            <div class="donors-list" id="blood-donors-list">
+              <!-- Rendered via app.js -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. VOLUNTEER NETWORK -->
+    <section id="volunteers-page" class="page-view">
+      <div class="container" style="padding: 40px 0;">
+        <div class="flex justify-between align-center" style="margin-bottom: 30px;">
+          <div>
+            <h1 style="font-size: 32px; margin-bottom: 4px;">Rescuer & Volunteer Mesh</h1>
+            <p style="font-size: 14px; color: var(--text-muted);">Deploy volunteer nodes matching critical responder skills.</p>
+          </div>
+          <button class="btn btn-success open-volunteer-modal-btn">
+            <i data-lucide="user-plus"></i> Register Volunteer Node
+          </button>
+        </div>
+
+        <div class="glass-card" style="padding: 16px; margin-bottom: 30px;">
+          <div class="flex align-center" style="width: 100%;">
+            <i data-lucide="search" style="margin-right: 12px; color: var(--text-muted);"></i>
+            <input type="text" id="search-vol-input" style="width: 100%; font-size: 15px;" placeholder="Search volunteers by skill name (e.g. First Aid, Medical), name, or service area coverage...">
+          </div>
+        </div>
+
+        <div class="grid listings-grid" id="volunteers-grid">
+          <!-- Loaded via app.js -->
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. ADMIN CONSOLE -->
+    <section id="admin-page" class="page-view">
+      <div class="container" style="padding: 40px 0;">
+        <div class="flex justify-between align-center" style="margin-bottom: 30px;">
+          <div>
+            <span class="section-badge badge-danger-soft">SYSTEM CONSOLE</span>
+            <h1 style="font-size: 32px; margin-top: 6px;">Global Admin Dashboard</h1>
+          </div>
+          <button class="btn btn-outline" id="sim-trigger-btn" onclick="window.triggerToast('Manual Admin Simulation', 'Simulating new high-priority incidents in sector 9.', 'danger');">
+            Force Sim Event
+          </button>
+        </div>
+
+        <!-- Metrics widgets -->
+        <div class="grid admin-metrics gap-md" style="margin-bottom: 30px;">
+          <div class="glass-card" style="padding: 20px;">
+            <p style="font-size: 12px; font-weight:700; color: var(--text-muted);">TOTAL MAPPED NODES</p>
+            <h2 style="font-size: 28px; margin-top: 6px;" id="adm-total-users">142</h2>
+          </div>
+          <div class="glass-card" style="padding: 20px;">
+            <p style="font-size: 12px; font-weight:700; color: var(--text-muted);">ACTIVE LISTINGS INDEXED</p>
+            <h2 style="font-size: 28px; margin-top: 6px;" id="adm-active-listings">--</h2>
+          </div>
+          <div class="glass-card" style="padding: 20px;">
+            <p style="font-size: 12px; font-weight:700; color: var(--text-muted);">REGISTERED RESPONDERS</p>
+            <h2 style="font-size: 28px; margin-top: 6px;" id="adm-active-vols">--</h2>
+          </div>
+          <div class="glass-card" style="padding: 20px;">
+            <p style="font-size: 12px; font-weight:700; color: var(--text-muted);">REPORTS / FLAGGED</p>
+            <h2 style="font-size: 28px; margin-top: 6px; color: var(--color-danger);" id="adm-flagged-items">0</h2>
+          </div>
+        </div>
+
+        <!-- Terminal Logs -->
+        <div class="glass-card" style="padding: 24px; margin-bottom: 30px;">
+          <h3 style="font-size: 16px; margin-bottom: 12px;" class="flex align-center gap-sm">
+            <i data-lucide="terminal"></i> System Engine Match Logger (Live Sync)
+          </h3>
+          <div class="admin-log-panel" id="admin-log-panel">
+            <!-- Appended via app.js -->
+          </div>
+        </div>
+
+        <!-- Listings Moderation -->
+        <div class="glass-card" style="padding: 24px; overflow-x: auto;">
+          <h3 style="font-size: 16px; margin-bottom: 12px;">Active Listing Moderation</h3>
+          <table class="moderation-table">
+            <thead>
+              <tr>
+                <th>Listing Title</th>
+                <th>Type</th>
+                <th>Category</th>
+                <th>Urgency</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adm-listings-tbody">
+              <!-- Loaded via app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==========================================================================
+       Modals
+       ========================================================================== -->
+
+  <!-- A. Auth Modal -->
+  <div class="modal-backdrop" id="auth-modal">
+    <div class="modal-container glass-card" style="padding: 0; background-color: var(--bg-card);">
+      <div class="modal-header flex justify-between align-center">
+        <h3 class="modal-title">Sign In / Register</h3>
+        <button id="close-auth-modal" class="btn-icon-only" style="border:none;"><i data-lucide="x"></i></button>
+      </div>
+      
+      <div style="border-bottom: 1px solid var(--border-color);" class="flex">
+        <button id="auth-tab-login" style="flex:1; padding:12px; font-weight:700; border-bottom: 2px solid var(--color-primary);">Sign In</button>
+        <button id="auth-tab-signup" style="flex:1; padding:12px; font-weight:700; border-bottom: 2px solid transparent;">Register</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Google Quick login -->
+        <button class="btn btn-outline" id="google-auth-btn" style="width: 100%; margin-bottom: 20px; font-size:14px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.49-11.05 1-11.6 8.56"/></svg>
+          Continue with Google
+        </button>
+
+        <div style="text-align: center; color: var(--text-muted); font-size:12px; margin-bottom:20px; position:relative;">
+          <span style="background-color: var(--bg-card); padding: 0 10px; z-index:2; position:relative;">OR USE SECURITY EMAIL</span>
+          <div style="position:absolute; top:50%; left:0; width:100%; height:1px; background-color:var(--border-color); z-index:1;"></div>
+        </div>
+
+        <!-- Login form -->
+        <form id="auth-login-form">
+          <div class="form-group">
+            <label class="form-label">Email Address</label>
+            <input type="email" id="login-email" class="form-input" required placeholder="admin@emergencyconnect.org (for Admin bypass)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="login-pwd" class="form-input" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; padding:12px;">Authorize Account</button>
+        </form>
+
+        <!-- Signup form -->
+        <form id="auth-signup-form" style="display: none;">
+          <div class="form-group">
+            <label class="form-label">Full Name</label>
+            <input type="text" id="signup-name" class="form-input" placeholder="Alex Rivera">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email Address</label>
+            <input type="email" id="signup-email" class="form-input" placeholder="alex@domain.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="signup-pwd" class="form-input" placeholder="Create strong password">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; padding:12px;">Create Security Profile</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- B. Add Resource Modal -->
+  <div class="modal-backdrop" id="add-resource-modal">
+    <div class="modal-container glass-card" style="padding: 0; background-color: var(--bg-card);">
+      <div class="modal-header flex justify-between align-center">
+        <h3 class="modal-title">Publish Asset / Request</h3>
+        <button id="close-resource-modal" class="btn-icon-only" style="border:none;"><i data-lucide="x"></i></button>
+      </div>
+      <form id="create-resource-form">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Listing Title</label>
+            <input type="text" id="res-title" class="form-input" required placeholder="e.g. 50 cases of clean drinking water">
+          </div>
+          
+          <div class="grid" style="grid-template-columns: 1fr 1fr; gap:16px;">
+            <div class="form-group">
+              <label class="form-label">Listing Type</label>
+              <select id="res-type-select" class="form-input">
+                <option value="request">Request Aid</option>
+                <option value="offer">Offer Resource</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Urgency Level</label>
+              <select id="res-urgency" class="form-input">
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="high">High</option>
+                <option value="critical">Critical (Life at Risk)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid" style="grid-template-columns: 1.2fr 0.8fr; gap:16px;">
+            <div class="form-group">
+              <label class="form-label">Resource Category</label>
+              <select id="res-category" class="form-input">
+                <option value="Medicines">Medicines</option>
+                <option value="Blood Donors">Blood Donors</option>
+                <option value="Food Packets">Food Packets</option>
+                <option value="Emergency Transport">Emergency Transport</option>
+                <option value="Temporary Shelter">Temporary Shelter</option>
+                <option value="Volunteers">Volunteers</option>
+                <option value="Medical Equipment">Medical Equipment</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Quantity</label>
+              <input type="number" id="res-qty" class="form-input" min="1" value="1">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Geospatial Address / Sector</label>
+            <input type="text" id="res-address" class="form-input" required placeholder="e.g. Richmond District, San Francisco, CA">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Emergency Callback / Contact</label>
+            <input type="text" id="res-contact" class="form-input" required placeholder="e.g. +1 (555) 012-3984 (NGO Team)">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Detailed Notes / Requirements</label>
+            <textarea id="res-desc" class="form-input form-textarea" placeholder="Include specifics, timing guidelines, and instructions..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer flex justify-end">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-resource-modal').classList.remove('active')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Publish to Directory</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- C. Register Volunteer Modal -->
+  <div class="modal-backdrop" id="volunteer-modal">
+    <div class="modal-container glass-card" style="padding: 0; background-color: var(--bg-card);">
+      <div class="modal-header flex justify-between align-center">
+        <h3 class="modal-title">Register Responder Node</h3>
+        <button id="close-volunteer-modal" class="btn-icon-only" style="border:none;"><i data-lucide="x"></i></button>
+      </div>
+      <form id="register-volunteer-form">
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Full Name</label>
+            <input type="text" id="vol-name" class="form-input" required placeholder="e.g. Emily Watson">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contact Mobile</label>
+            <input type="text" id="vol-phone" class="form-input" required placeholder="e.g. +1 (555) 014-5566">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Coverage Service Sector</label>
+            <input type="text" id="vol-area" class="form-input" required placeholder="e.g. Sunset & Richmond, San Francisco">
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="margin-bottom: 12px;">Active Response Skills</label>
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 10px;">
+              <label class="flex align-center gap-sm" style="font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="vol-skill-chk" value="Medical (MD/RN)"> Medical (MD/RN)
+              </label>
+              <label class="flex align-center gap-sm" style="font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="vol-skill-chk" value="First Aid"> First Aid
+              </label>
+              <label class="flex align-center gap-sm" style="font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="vol-skill-chk" value="Search & Rescue"> Search & Rescue
+              </label>
+              <label class="flex align-center gap-sm" style="font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="vol-skill-chk" value="Logistics"> Logistics
+              </label>
+              <label class="flex align-center gap-sm" style="font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="vol-skill-chk" value="Food Distribution"> Food Distribution
+              </label>
+              <label class="flex align-center gap-sm" style="font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="vol-skill-chk" value="Crisis Counseling"> Crisis Counseling
+              </label>
+              <label class="flex align-center gap-sm" style="font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="vol-skill-chk" value="Radio Operation"> Radio Operation
+              </label>
+              <label class="flex align-center gap-sm" style="font-size:13px; cursor:pointer;">
+                <input type="checkbox" class="vol-skill-chk" value="Translation"> Translation
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer flex justify-end">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('volunteer-modal').classList.remove('active')">Cancel</button>
+          <button type="submit" class="btn btn-success">Activate Responder Node</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- D. SOS Emergency Request Modal -->
+  <div class="modal-backdrop" id="sos-modal">
+    <div class="modal-container glass-card" style="padding: 0; background-color: var(--bg-card); max-width: 460px;">
+      <div class="modal-header flex justify-between align-center" style="background-color: rgba(239, 68, 68, 0.05); border-bottom-color: rgba(239, 68, 68, 0.15);">
+        <h3 class="modal-title" style="color: var(--color-danger);" class="flex align-center gap-sm">
+          <i data-lucide="alert-octagon" style="vertical-align: middle;"></i> Broadcast SOS Beacon
+        </h3>
+        <button id="close-sos-modal" class="btn-icon-only" style="border:none; background:none; color: var(--color-danger);"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body" style="text-align: center;">
+        <div class="sos-pulse-circle">
+          <i data-lucide="alert-triangle" style="width: 44px; height: 44px;"></i>
+        </div>
+        
+        <h3 style="font-size: 20px; margin-bottom: 12px;">Verify Emergency Broadcast</h3>
+        <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 24px; padding: 0 10px;">
+          Activating this SOS beacon immediately publishes a critical, high-priority incident onto the map using browser GPS coordinates and alerts nearby responder nodes.
+        </p>
+
+        <div style="text-align: left; background-color: var(--bg-app); border:1px solid var(--border-color); border-radius: var(--radius-md); padding:16px;">
+          <div class="form-group">
+            <label class="form-label" style="color: var(--color-danger);">Describe Emergency Incident</label>
+            <input type="text" id="sos-incident-desc" class="form-input" style="border-color: rgba(239, 68, 68, 0.2);" required placeholder="e.g. Family trapped in basement due to rising water">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Callback Phone Number</label>
+            <input type="text" id="sos-contact-phone" class="form-input" required placeholder="e.g. +1 (555) 019-2834">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer flex justify-between" style="border-top:none;">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('sos-modal').classList.remove('active')">Cancel</button>
+        <button type="button" id="trigger-sos-confirm" class="btn btn-danger" style="flex:1; margin-left: 12px;">Trigger Active Beacon</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       Footer Section
+       ========================================================================== -->
+  <footer class="footer">
+    <div class="container">
+      <div class="grid footer-grid">
+        <div>
+          <div class="logo footer-logo">
+            <i data-lucide="shield-alert" class="logo-icon"></i>
+            <div class="logo-text">Emergency<span>Connect</span></div>
+          </div>
+          <p class="footer-desc">Empowering local community resilience and swift logistical relief during natural disasters and medical emergencies.</p>
+          <div class="flex gap-sm" style="margin-top:16px;">
+            <span style="font-size: 11px; background-color: rgba(16, 185, 129, 0.15); color: var(--color-success); font-weight:700; padding: 4px 10px; border-radius:999px;" class="flex align-center gap-sm">
+              <span style="width: 6px; height: 6px; border-radius:50%; background-color:var(--color-success); display:inline-block;"></span>
+              FEMA Mesh Sync Active
+            </span>
+          </div>
+        </div>
+        
+        <div>
+          <h4 class="footer-title">Platform Gateway</h4>
+          <ul class="footer-links">
+            <li><a href="#home">Home Registry</a></li>
+            <li><a href="#dashboard">Live Controls</a></li>
+            <li><a href="#resources">Aid Directory</a></li>
+            <li><a href="#blood">Blood Database</a></li>
+          </ul>
+        </div>
+        
+        <div>
+          <h4 class="footer-title">Emergency Handlers</h4>
+          <ul class="footer-links">
+            <li><a href="#volunteers">Responder Grid</a></li>
+            <li><a href="#home">GIS Incident Map</a></li>
+            <li><a href="#resources">Shelter Index</a></li>
+            <li><a href="#admin">Admin Settings</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4 class="footer-title">Legal & Contact</h4>
+          <ul class="footer-links">
+            <li><a href="#home">NGO Terms</a></li>
+            <li><a href="#home">Privacy Shield</a></li>
+            <li><a href="tel:911">911 Dispatch Bypass</a></li>
+            <li><a href="#home">Developer API</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-bottom flex justify-between align-center">
+        <p>&copy; 2026 Emergency Connect. Created for Hackathon Disaster Resilience Track.</p>
+        <p class="flex align-center gap-sm" style="font-size:12px;">
+          <i data-lucide="shield-check" style="color: var(--color-success); width:16px; height:16px;"></i> Secure SSL • HIPAA Compliant
+        </p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- Local Scripts -->
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
