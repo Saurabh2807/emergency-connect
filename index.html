@@ -33,6 +33,11 @@
       </nav>
 
       <div class="nav-actions flex align-center">
+        <!-- Mesh Network Toggle -->
+        <button id="mesh-toggle-btn" class="btn-icon-only" title="Toggle Offline Mesh Network Mode">
+          <i data-lucide="wifi-off"></i>
+        </button>
+
         <!-- Theme Toggle -->
         <button id="theme-toggle-btn" class="btn-icon-only" title="Toggle Light/Dark Mode">
           <i data-lucide="moon"></i>
@@ -42,6 +47,11 @@
         <button class="btn-icon-only" title="Emergency Notifications" style="position: relative;" onclick="window.location.hash='#dashboard'">
           <i data-lucide="bell"></i>
           <span class="notification-dot"></span>
+        </button>
+
+        <!-- Hamburger Menu Button -->
+        <button id="mobile-menu-toggle" class="btn-icon-only hamburger-menu-btn" title="Open Menu">
+          <i data-lucide="menu"></i>
         </button>
 
         <!-- Auth Actions / User Menu -->
@@ -66,6 +76,16 @@
       </div>
     </div>
   </header>
+
+  <!-- Offline Mesh Mode Banner -->
+  <div id="mesh-status-banner" class="mesh-banner">
+    <i data-lucide="wifi-off" style="width: 16px; height: 16px;"></i>
+    <span>Mesh Network Mode Active — Local Peer Sync Only (RF/Bluetooth Network).</span>
+    <button id="mesh-sync-btn" class="mesh-sync-btn">Sync Peer Nodes</button>
+    <div id="mesh-sync-progress" style="display:none; width: 100px; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden; margin-left: 10px;">
+      <div id="mesh-sync-progress-fill" style="width: 0%; height: 100%; background: white; transition: width 0.1s;"></div>
+    </div>
+  </div>
 
   <!-- Real-Time Toast Notification Wrapper -->
   <div id="toast-wrapper" class="toast-container"></div>
@@ -111,7 +131,7 @@
                   <span style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--color-danger); display: inline-block;"></span>
                   LIVE NODE TRACKING
                 </span>
-                <span class="badge badge-low" style="background-color: var(--bg-card-hover);">San Francisco</span>
+                <span class="badge badge-low" style="background-color: var(--bg-card-hover);">Bhopal, MP</span>
               </div>
               <div style="height: 200px; background-color: var(--bg-app); border-radius: var(--radius-md); overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative; border: 1px solid var(--border-color);">
                 <i data-lucide="map" style="width: 48px; height: 48px; color: var(--text-muted); opacity: 0.5;"></i>
@@ -231,6 +251,11 @@
           <!-- Leaflet Map Container -->
           <div class="map-wrapper">
             <div id="home-map" class="leaflet-container"></div>
+            <!-- Heatmap overlay toggle -->
+            <button class="map-heatmap-toggle" id="home-heatmap-toggle">
+              <i data-lucide="flame" style="width: 14px; height: 14px; color: var(--color-danger);"></i>
+              Distress Hotspots
+            </button>
           </div>
           
           <!-- Nearby listings panel -->
@@ -348,6 +373,11 @@
               </h3>
               <div class="map-wrapper" style="height: 350px;">
                 <div id="db-mini-map" class="leaflet-container"></div>
+                <!-- Heatmap overlay toggle -->
+                <button class="map-heatmap-toggle" id="db-heatmap-toggle">
+                  <i data-lucide="flame" style="width: 14px; height: 14px; color: var(--color-danger);"></i>
+                  Distress Hotspots
+                </button>
               </div>
             </div>
 
@@ -481,7 +511,7 @@
           <div class="glass-card" style="padding: 30px;">
             <h3 style="font-size: 18px; margin-bottom: 20px;" class="flex align-center gap-sm">
               <i data-lucide="heart" style="color: var(--color-danger);"></i>
-              Matching Verified Donors (San Francisco)
+              Matching Verified Donors (Bhopal)
             </h3>
             
             <div class="donors-list" id="blood-donors-list">
@@ -700,11 +730,11 @@
 
           <div class="form-group">
             <label class="form-label">Geospatial Address / Sector</label>
-            <input type="text" id="res-address" class="form-input" required placeholder="e.g. Richmond District, San Francisco, CA">
+            <input type="text" id="res-address" class="form-input" required placeholder="e.g. MP Nagar, Bhopal, MP">
           </div>
           <div class="form-group">
             <label class="form-label">Emergency Callback / Contact</label>
-            <input type="text" id="res-contact" class="form-input" required placeholder="e.g. +1 (555) 012-3984 (NGO Team)">
+            <input type="text" id="res-contact" class="form-input" required placeholder="e.g. +91 98765 43210 (NGO Team)">
           </div>
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">Detailed Notes / Requirements</label>
@@ -730,15 +760,15 @@
         <div class="modal-body">
           <div class="form-group">
             <label class="form-label">Full Name</label>
-            <input type="text" id="vol-name" class="form-input" required placeholder="e.g. Emily Watson">
+            <input type="text" id="vol-name" class="form-input" required placeholder="e.g. Amit Sharma">
           </div>
           <div class="form-group">
             <label class="form-label">Contact Mobile</label>
-            <input type="text" id="vol-phone" class="form-input" required placeholder="e.g. +1 (555) 014-5566">
+            <input type="text" id="vol-phone" class="form-input" required placeholder="e.g. +91 98765 43210">
           </div>
           <div class="form-group">
             <label class="form-label">Coverage Service Sector</label>
-            <input type="text" id="vol-area" class="form-input" required placeholder="e.g. Sunset & Richmond, San Francisco">
+            <input type="text" id="vol-area" class="form-input" required placeholder="e.g. Kolar & Arera Colony, Bhopal">
           </div>
           <div class="form-group">
             <label class="form-label" style="margin-bottom: 12px;">Active Response Skills</label>
@@ -880,6 +910,63 @@
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   
+  <!-- Mobile Nav Drawer -->
+  <div class="mobile-nav-backdrop" id="mobile-nav-backdrop"></div>
+  <div class="mobile-nav-drawer" id="mobile-nav-drawer">
+    <div class="flex align-center justify-between" style="border-bottom: 1px solid var(--border-color); padding-bottom: 20px; margin-bottom: 20px;">
+      <div class="logo">
+        <i data-lucide="shield-alert" class="logo-icon"></i>
+        <div class="logo-text">Emergency<span>Connect</span></div>
+      </div>
+      <button id="close-mobile-menu" class="btn-icon-only" style="border:none; background:none;"><i data-lucide="x"></i></button>
+    </div>
+    <ul class="mobile-links">
+      <li><a href="#home" class="active">Home</a></li>
+      <li><a href="#dashboard">Dashboard</a></li>
+      <li><a href="#resources">Resources</a></li>
+      <li><a href="#blood">Blood Registry</a></li>
+      <li><a href="#volunteers">Volunteers</a></li>
+    </ul>
+    <div style="border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: auto;" class="flex flex-column gap-sm">
+      <button class="btn btn-sos trigger-sos-btn" style="width: 100%;">
+        <i data-lucide="alert-octagon"></i> SOS Emergency
+      </button>
+    </div>
+  </div>
+
+  <!-- Live Coordination Chat Drawer -->
+  <div id="coordination-chat-drawer" class="chat-drawer">
+    <div class="chat-header flex align-center justify-between">
+      <div class="flex align-center gap-sm">
+        <div class="user-avatar" id="chat-recipient-avatar" style="background-color: var(--color-danger);">SC</div>
+        <div>
+          <h4 id="chat-recipient-name" style="font-size: 15px;">Citizen Request Dispatch</h4>
+          <p id="chat-recipient-status" style="font-size: 11px; color: var(--color-success);" class="flex align-center gap-sm">
+            <span style="width: 6px; height: 6px; border-radius:50%; background-color: var(--color-success); display:inline-block;"></span>
+            Online via Mesh Link
+          </p>
+        </div>
+      </div>
+      <button id="close-chat-drawer" class="btn-icon-only" style="border:none; background:none;"><i data-lucide="x"></i></button>
+    </div>
+    
+    <div id="chat-messages-container" class="chat-messages">
+      <!-- Chat bubbles loaded dynamically -->
+    </div>
+    
+    <div class="chat-quick-replies" id="chat-replies-container">
+      <span class="chat-quick-tag" id="reply-tag-1" onclick="sendQuickReply('🚗 On my way')">🚗 On my way</span>
+      <span class="chat-quick-tag" id="reply-tag-2" onclick="sendQuickReply('🚒 Team dispatched')">🚒 Team dispatched</span>
+      <span class="chat-quick-tag" id="reply-tag-3" onclick="sendQuickReply('📦 Items secured')">📦 Items secured</span>
+      <span class="chat-quick-tag" id="reply-tag-4" onclick="sendQuickReply('📍 Confirm location')">📍 Confirm location</span>
+    </div>
+    
+    <form id="chat-send-form" class="chat-input-area">
+      <input type="text" id="chat-text-input" class="form-input" style="flex:1;" placeholder="Type emergency message..." required autocomplete="off">
+      <button type="submit" class="btn btn-primary" style="padding: 10px 18px;"><i data-lucide="send"></i></button>
+    </form>
+  </div>
+
   <!-- Local Scripts -->
   <script src="data.js"></script>
   <script src="app.js"></script>

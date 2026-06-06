@@ -15,7 +15,13 @@ document.addEventListener('DOMContentLoaded', () => {
     currentUser: null,
     currentTheme: 'light',
     activeTab: 'home',
-    systemLogs: []
+    systemLogs: [],
+    meshMode: false,
+    heatmapActive: false,
+    heatmapCircles: [],
+    activeRoute: null,
+    chatRecipient: null,
+    chats: {}
   };
 
   // Maps instances
@@ -40,11 +46,28 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       state = JSON.parse(JSON.stringify(window.emergencySeedData));
     }
+
+    // Safely restore/initialize new fields
+    state.meshMode = state.meshMode || false;
+    state.heatmapActive = state.heatmapActive || false;
+    state.heatmapCircles = [];
+    state.activeRoute = null;
+    state.chatRecipient = null;
+    state.chats = state.chats || {};
     
     // Set default theme
     state.currentTheme = localStorage.getItem('emergency_connect_theme') || 'light';
     document.documentElement.setAttribute('data-theme', state.currentTheme);
     updateThemeToggleUI();
+
+    // Restore Mesh Mode UI state on boot
+    const toggleBtn = document.getElementById('mesh-toggle-btn');
+    const banner = document.getElementById('mesh-status-banner');
+    if (state.meshMode && toggleBtn && banner) {
+      toggleBtn.classList.add('mesh-toggle-active');
+      toggleBtn.innerHTML = `<i data-lucide="wifi"></i>`;
+      banner.classList.add('active');
+    }
 
     // Check session
     const sessionUser = sessionStorage.getItem('emergency_connect_user');
@@ -146,9 +169,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     mapMarkers = [];
 
-    // Center SF
+    // Center Bhopal, MP
     mainMap = L.map(elementId, {
-      center: [37.7749, -122.4194],
+      center: [23.2599, 77.4126],
       zoom: 12.5,
       zoomControl: true
     });
@@ -245,6 +268,16 @@ document.addEventListener('DOMContentLoaded', () => {
       marker.bindPopup(popupContent);
       mapMarkers.push(marker);
     });
+
+    // Redraw active routes if map is recreated
+    if (state.activeRoute && state.activeRoute.coords) {
+      drawDeliveryRoute(state.activeRoute.coords[0], state.activeRoute.coords[1]);
+    }
+
+    // Redraw heatmap circles if active
+    if (state.heatmapActive) {
+      renderHeatmap();
+    }
   }
 
   // Handle Action Clicks Inside Map Popups
@@ -253,7 +286,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const listingId = e.target.getAttribute('data-id');
       const item = state.listings.find(x => x.id === listingId);
       if (item) {
-        showToast("Coordination Initiated", `Contacted listing dispatcher for: ${item.title}. You have been registered to coordinate.`, "success");
+        const userLoc = [23.2599, 77.4126]; // Bhopal Center Mock
+        const destLoc = [item.location.lat, item.location.lng];
+        drawDeliveryRoute(userLoc, destLoc);
+        
+        openChatDrawer(
+          item.id,
+          item.contact.split('(')[1]?.replace(')', '') || 'Dispatcher',
+          'SC',
+          destLoc[0],
+          destLoc[1],
+          `Hello! I see your request for: "${item.title}". I am ready to coordinate and help.`
+        );
         logSystemAction(`User initiated coordination for listing ID: ${listingId}`);
       }
     }
@@ -261,7 +305,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const volId = e.target.getAttribute('data-id');
       const vol = state.volunteers.find(x => x.id === volId);
       if (vol) {
-        showToast("Volunteer Alerted", `Dispatched notification to ${vol.name} for current service area.`, "success");
+        const userLoc = [23.2599, 77.4126];
+        const destLoc = [vol.lat, vol.lng];
+        drawDeliveryRoute(userLoc, destLoc);
+        
+        openChatDrawer(
+          vol.id,
+          vol.name,
+          vol.name.split(' ').map(n=>n[0]).join(''),
+          destLoc[0],
+          destLoc[1],
+          `Emergency dispatcher calling Volunteer ${vol.name}. Dispatching rescue route coordinates now.`
+        );
         logSystemAction(`Volunteer ${vol.name} dispatched to current active incident.`);
       }
     }
@@ -441,6 +496,34 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
       }
 
+      // Check for Smart Matches
+      let suggestedMatchesHTML = '';
+      if (item.type === 'request' && item.status === 'pending') {
+        const matches = state.listings.filter(x => x.type === 'offer' && x.category === item.category && x.status === 'available');
+        if (matches.length > 0) {
+          suggestedMatchesHTML = `
+            <div class="smart-match-container">
+              <div style="font-size: 12px; font-weight: 700; color: var(--color-success); margin-bottom: 8px;" class="flex align-center gap-sm">
+                <i data-lucide="sparkles" style="width: 14px; height: 14px;"></i> Smart Matches Available (${matches.length})
+              </div>
+              <div class="flex flex-column gap-sm">
+                ${matches.map(m => `
+                  <div class="match-card flex align-center justify-between">
+                    <div>
+                      <div style="font-size: 12px; font-weight: 600;">${m.title}</div>
+                      <div style="font-size: 10px; color: var(--text-muted);">📍 ${m.location.address.split(',')[0]}</div>
+                    </div>
+                    <button class="btn btn-success match-connect-btn" data-req-id="${item.id}" data-off-id="${m.id}" style="padding: 4px 10px; font-size: 11px; border-radius: 6px; width:auto;">
+                      Match
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+        }
+      }
+
       return `
         <div class="glass-card listing-card" style="padding: 24px;">
           <div class="flex align-center justify-between" style="margin-bottom: 12px;">
@@ -466,6 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <i data-lucide="package" style="width: 14px; height: 14px;"></i>
               <span>Quantity: ${item.quantity} (${item.status})</span>
             </div>
+            ${suggestedMatchesHTML}
           </div>
 
           <div class="listing-footer flex gap-sm align-center">
@@ -505,6 +589,40 @@ document.addEventListener('DOMContentLoaded', () => {
           saveState();
           showToast("Listing Deleted", `Removed listing '${title}' from system databases.`, "info");
           logSystemAction(`Listing deleted: ${title} (ID: ${id})`);
+          renderListings();
+        }
+      });
+    });
+
+    document.querySelectorAll('.match-connect-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const reqId = btn.getAttribute('data-req-id');
+        const offId = btn.getAttribute('data-off-id');
+        const req = state.listings.find(x => x.id === reqId);
+        const off = state.listings.find(x => x.id === offId);
+        
+        if (req && off) {
+          req.status = 'fulfilled';
+          off.status = 'fulfilled';
+          state.stats.savedLives = (state.stats.savedLives || 1204) + 1;
+          saveState();
+          
+          showToast("Match Connected!", `Successfully matched request with offer! Route is mapped on your console.`, "success");
+          logSystemAction(`Smart Match linked: [REQUEST] ${req.title} with [OFFER] ${off.title}`);
+          
+          // Draw route on map between the two matched resources
+          drawDeliveryRoute([off.location.lat, off.location.lng], [req.location.lat, req.location.lng]);
+          
+          // Open coordination chat
+          openChatDrawer(
+            req.id,
+            req.contact.split('(')[1]?.replace(')', '') || 'Citizen in distress',
+            'SC',
+            req.location.lat,
+            req.location.lng,
+            `Match alert! We have connected your request with Hope Kitchen NGO's offer: "${off.title}". Coordination route mapped.`
+          );
+          
           renderListings();
         }
       });
@@ -883,14 +1001,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const sosDescription = document.getElementById('sos-incident-desc').value || "SOS Alert: Immediate assistance required.";
       const sosContact = document.getElementById('sos-contact-phone').value || "+1 (555) 911-HELP";
       
-      // Select mock coordinates in SF centered around the user location to put on the map
-      const sfCenters = [
-        { address: "Golden Gate Park, San Francisco", lat: 37.7694, lng: -122.4862 },
-        { address: "Fisherman's Wharf, San Francisco", lat: 37.8080, lng: -122.4177 },
-        { address: "Union Square, San Francisco", lat: 37.7879, lng: -122.4074 },
-        { address: "Civic Center, San Francisco", lat: 37.7793, lng: -122.4192 }
+      // Select mock coordinates in Bhopal centered around the user location to put on the map
+      const bhopalCenters = [
+        { address: "Lake View Road, Bhopal", lat: 23.2492, lng: 77.3888 },
+        { address: "DB Mall, MP Nagar, Bhopal", lat: 23.2325, lng: 77.4326 },
+        { address: "New Market, TT Nagar, Bhopal", lat: 23.2415, lng: 77.4018 },
+        { address: "Van Vihar Road, Bhopal", lat: 23.2384, lng: 77.3685 }
       ];
-      const selectedLoc = sfCenters[Math.floor(Math.random() * sfCenters.length)];
+      const selectedLoc = bhopalCenters[Math.floor(Math.random() * bhopalCenters.length)];
 
       const newSos = {
         id: "sos-" + Date.now(),
@@ -972,9 +1090,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const contact = document.getElementById('res-contact').value;
       const description = document.getElementById('res-desc').value;
 
-      // Generate random lat/lng around SF to show on map
-      const lat = 37.73 + Math.random() * 0.07;
-      const lng = -122.49 + Math.random() * 0.08;
+      // Generate random lat/lng around Bhopal to show on map
+      const lat = 23.16 + Math.random() * 0.12;
+      const lng = 77.35 + Math.random() * 0.12;
 
       const newListing = {
         id: "list-" + Date.now(),
@@ -1059,9 +1177,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // Random position in SF
-      const lat = 37.74 + Math.random() * 0.05;
-      const lng = -122.48 + Math.random() * 0.06;
+      // Random position in Bhopal
+      const lat = 23.16 + Math.random() * 0.12;
+      const lng = 77.35 + Math.random() * 0.12;
 
       const newVol = {
         id: "vol-" + Date.now(),
@@ -1223,6 +1341,347 @@ document.addEventListener('DOMContentLoaded', () => {
       logSystemAction(`Theme swapped to: ${state.currentTheme}`);
     });
   }
+
+  // ==========================================================================
+  // 10.1 Offline Mesh Network Logic
+  // ==========================================================================
+  const meshToggleBtn = document.getElementById('mesh-toggle-btn');
+  const meshStatusBanner = document.getElementById('mesh-status-banner');
+  const meshSyncBtn = document.getElementById('mesh-sync-btn');
+  
+  if (meshToggleBtn) {
+    meshToggleBtn.addEventListener('click', () => {
+      state.meshMode = !state.meshMode;
+      localStorage.setItem('emergency_connect_mesh', state.meshMode);
+      
+      if (state.meshMode) {
+        meshToggleBtn.classList.add('mesh-toggle-active');
+        meshToggleBtn.innerHTML = `<i data-lucide="wifi"></i>`;
+        meshStatusBanner.classList.add('active');
+        showToast("Offline Mesh Active", "Connected via local peer-to-peer mesh. Cellular backup online.", "warning");
+        logSystemAction("Mesh network peering activated. Listening for offline nodes.");
+      } else {
+        meshToggleBtn.classList.remove('mesh-toggle-active');
+        meshToggleBtn.innerHTML = `<i data-lucide="wifi-off"></i>`;
+        meshStatusBanner.classList.remove('active');
+        showToast("Online Mode Active", "Broadband sync restored with global FEMA servers.", "success");
+        logSystemAction("Global DNS synchronization restored. Mesh standby active.");
+      }
+      lucide.createIcons();
+    });
+  }
+  
+  if (meshSyncBtn) {
+    meshSyncBtn.addEventListener('click', () => {
+      meshSyncBtn.disabled = true;
+      meshSyncBtn.style.opacity = '0.5';
+      const progressDiv = document.getElementById('mesh-sync-progress');
+      const progressFill = document.getElementById('mesh-sync-progress-fill');
+      progressDiv.style.display = 'inline-block';
+      progressFill.style.width = '0%';
+      
+      let width = 0;
+      const interval = setInterval(() => {
+        width += 10;
+        progressFill.style.width = width + '%';
+        if (width >= 100) {
+          clearInterval(interval);
+          setTimeout(() => {
+            progressDiv.style.display = 'none';
+            meshSyncBtn.disabled = false;
+            meshSyncBtn.style.opacity = '1';
+            
+            // Add mock listings from peer node sync
+            const mockPeerListings = [
+              {
+                id: "list-mesh-1",
+                title: "[Mesh-Node] Food Request in Sector 4",
+                category: "Food Packets",
+                type: "request",
+                description: "Urgent need for 10 water bottles and food packets at community base point.",
+                location: { address: "MP Nagar, Bhopal, MP", lat: 23.2323, lng: 77.4318 },
+                contact: "+91 94220 99887 (Node-B5)",
+                urgency: "high",
+                quantity: 10,
+                status: "pending",
+                timestamp: new Date().toISOString(),
+                userId: "mesh-node-b5"
+              },
+              {
+                id: "list-mesh-2",
+                title: "[Mesh-Node] Available: Transport Jeep",
+                category: "Emergency Transport",
+                type: "offer",
+                description: "Heavy logistics vehicle with high water clearance, ready to dispatch.",
+                location: { address: "Kolar Road, Bhopal, MP", lat: 23.1690, lng: 77.4172 },
+                contact: "+91 91311 00223 (Node-Kolar-A)",
+                urgency: "medium",
+                quantity: 1,
+                status: "available",
+                timestamp: new Date().toISOString(),
+                userId: "mesh-node-kolar"
+              }
+            ];
+            
+            state.listings.unshift(...mockPeerListings);
+            state.stats.activeRequests += 1;
+            state.stats.resourcesAvailable += 1;
+            
+            state.activities.unshift({
+              id: "act-mesh-sync-" + Date.now(),
+              type: "offer_created",
+              title: "Mesh Data Synchronized",
+              message: "Merged database updates with Sunset-A and Richmond-B5 local peer groups.",
+              timestamp: new Date().toISOString()
+            });
+            
+            saveState();
+            showToast("Sync Successful", "Merged 2 new requests/offers from local RF nodes.", "success");
+            logSystemAction("Offline database merge complete. Mapped 2 new mesh listings.");
+            
+            // Refresh
+            triggerViewRender(state.activeTab);
+          }, 400);
+        }
+      }, 150);
+    });
+  }
+
+  // ==========================================================================
+  // 10.2 Leaflet Polyline Routing Logic
+  // ==========================================================================
+  function drawDeliveryRoute(fromLatLng, toLatLng) {
+    if (!mainMap) return;
+    
+    if (state.activeRoute && state.activeRoute.line) {
+      mainMap.removeLayer(state.activeRoute.line);
+    }
+    
+    const line = L.polyline([fromLatLng, toLatLng], {
+      color: 'var(--color-primary)',
+      weight: 5,
+      dashArray: '10, 10',
+      opacity: 0.8
+    }).addTo(mainMap);
+    
+    // Fit map bounds to show route
+    mainMap.fitBounds(L.latLngBounds([fromLatLng, toLatLng]), { padding: [50, 50] });
+    
+    state.activeRoute = {
+      coords: [fromLatLng, toLatLng],
+      line: line
+    };
+  }
+  
+  function clearDeliveryRoute() {
+    if (mainMap && state.activeRoute && state.activeRoute.line) {
+      mainMap.removeLayer(state.activeRoute.line);
+    }
+    state.activeRoute = null;
+  }
+
+  // ==========================================================================
+  // 10.3 Distress Hotspots Heatmap Logic
+  // ==========================================================================
+  function renderHeatmap() {
+    if (!mainMap) return;
+    clearHeatmap();
+    
+    // Calculate hotspots based on critical/high listings
+    state.listings.forEach(item => {
+      if (item.type === 'request' && item.status === 'pending' && (item.urgency === 'critical' || item.urgency === 'high')) {
+        const circle = L.circle([item.location.lat, item.location.lng], {
+          radius: 500,
+          color: 'var(--color-danger)',
+          fillColor: 'var(--color-danger)',
+          fillOpacity: 0.18,
+          stroke: false
+        }).addTo(mainMap);
+        state.heatmapCircles.push(circle);
+      }
+    });
+  }
+  
+  function clearHeatmap() {
+    if (mainMap && state.heatmapCircles.length > 0) {
+      state.heatmapCircles.forEach(c => mainMap.removeLayer(c));
+    }
+    state.heatmapCircles = [];
+  }
+  
+  function toggleHeatmap(homeBtn, dbBtn) {
+    state.heatmapActive = !state.heatmapActive;
+    
+    const updateBtnStyle = (btn) => {
+      if (!btn) return;
+      if (state.heatmapActive) {
+        btn.classList.add('mesh-toggle-active'); // Re-use mesh highlight
+      } else {
+        btn.classList.remove('mesh-toggle-active');
+      }
+    };
+    
+    updateBtnStyle(homeBtn);
+    updateBtnStyle(dbBtn);
+    
+    if (state.heatmapActive) {
+      renderHeatmap();
+      showToast("Distress Heatmap Active", "Hotspots showing high critical request densities.", "danger");
+      logSystemAction("Distress hotspot overlay enabled on map.");
+    } else {
+      clearHeatmap();
+      showToast("Heatmap Overlay Off", "Cleared critical hotspot layers.", "info");
+      logSystemAction("Distress hotspot overlay disabled.");
+    }
+  }
+
+  const homeHeatmapToggle = document.getElementById('home-heatmap-toggle');
+  const dbHeatmapToggle = document.getElementById('db-heatmap-toggle');
+  
+  if (homeHeatmapToggle) {
+    homeHeatmapToggle.addEventListener('click', () => {
+      toggleHeatmap(homeHeatmapToggle, dbHeatmapToggle);
+    });
+  }
+  
+  if (dbHeatmapToggle) {
+    dbHeatmapToggle.addEventListener('click', () => {
+      toggleHeatmap(homeHeatmapToggle, dbHeatmapToggle);
+    });
+  }
+
+  // ==========================================================================
+  // 10.4 Live Coordination Chat Logic
+  // ==========================================================================
+  const chatDrawer = document.getElementById('coordination-chat-drawer');
+  const closeChatBtn = document.getElementById('close-chat-drawer');
+  const chatForm = document.getElementById('chat-send-form');
+  const chatInput = document.getElementById('chat-text-input');
+  const chatMessagesContainer = document.getElementById('chat-messages-container');
+  
+  function openChatDrawer(recipientId, name, avatar, targetLat, targetLng, initialMsg) {
+    state.chatRecipient = { id: recipientId, name: name, avatar: avatar, lat: targetLat, lng: targetLng };
+    
+    document.getElementById('chat-recipient-avatar').innerText = avatar;
+    document.getElementById('chat-recipient-name').innerText = name;
+    
+    // Initialize chat session if empty
+    if (!state.chats[recipientId]) {
+      state.chats[recipientId] = [
+        { sender: 'received', text: `Hi! This is ${name}. Thanks for reaching out. Let me know how we can coordinate.`, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }
+      ];
+      if (initialMsg) {
+        state.chats[recipientId].push({ sender: 'sent', text: initialMsg, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
+      }
+    }
+    
+    renderChatMessages();
+    chatDrawer.classList.add('active');
+  }
+  
+  if (closeChatBtn) {
+    closeChatBtn.addEventListener('click', () => {
+      chatDrawer.classList.remove('active');
+      clearDeliveryRoute();
+    });
+  }
+  
+  function renderChatMessages() {
+    if (!state.chatRecipient) return;
+    const messages = state.chats[state.chatRecipient.id] || [];
+    
+    chatMessagesContainer.innerHTML = messages.map(msg => `
+      <div class="chat-bubble ${msg.sender}">
+        <div>${msg.text}</div>
+        <div class="chat-bubble-time">${msg.time}</div>
+      </div>
+    `).join('');
+    
+    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+  }
+  
+  window.sendQuickReply = function(text) {
+    if (!state.chatRecipient) return;
+    const recipientId = state.chatRecipient.id;
+    const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    
+    state.chats[recipientId].push({ sender: 'sent', text: text, time: time });
+    renderChatMessages();
+    
+    // Sim reply from simulated user after 1.5 seconds
+    setTimeout(() => {
+      const responses = [
+        "Sounds good. Coordinates confirmed.",
+        "Thank you! Will wait for you here.",
+        "Understood. We are preparing the node.",
+        "Copy that. Keeping channels open."
+      ];
+      const reply = responses[Math.floor(Math.random() * responses.length)];
+      state.chats[recipientId].push({ sender: 'received', text: reply, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
+      renderChatMessages();
+      showToast("Incoming Coordination Update", `Message from ${state.chatRecipient.name}`, "primary");
+    }, 1500);
+  };
+  
+  if (chatForm) {
+    chatForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = chatInput.value.trim();
+      if (!text) return;
+      
+      const recipientId = state.chatRecipient.id;
+      const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      
+      state.chats[recipientId].push({ sender: 'sent', text: text, time: time });
+      chatInput.value = '';
+      renderChatMessages();
+      
+      // Simulated answer
+      setTimeout(() => {
+        state.chats[recipientId].push({ sender: 'received', text: "Received message on mesh. Standing by.", time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
+        renderChatMessages();
+      }, 1500);
+    });
+  }
+
+  // ==========================================================================
+  // 10.5 Mobile Nav Drawer Logic
+  // ==========================================================================
+  const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+  const closeMobileMenu = document.getElementById('close-mobile-menu');
+  const mobileNavDrawer = document.getElementById('mobile-nav-drawer');
+  const mobileNavBackdrop = document.getElementById('mobile-nav-backdrop');
+  
+  if (mobileMenuToggle) {
+    mobileMenuToggle.addEventListener('click', () => {
+      mobileNavDrawer.classList.add('active');
+      mobileNavBackdrop.classList.add('active');
+    });
+  }
+  
+  const closeMenu = () => {
+    mobileNavDrawer.classList.remove('active');
+    mobileNavBackdrop.classList.remove('active');
+  };
+  
+  if (closeMobileMenu) {
+    closeMobileMenu.addEventListener('click', closeMenu);
+  }
+  if (mobileNavBackdrop) {
+    mobileNavBackdrop.addEventListener('click', closeMenu);
+  }
+  
+  document.querySelectorAll('.mobile-links a').forEach(link => {
+    link.addEventListener('click', (e) => {
+      const hash = link.getAttribute('href');
+      closeMenu();
+      
+      document.querySelectorAll('.mobile-links a').forEach(l => {
+        if (l.getAttribute('href') === hash) l.classList.add('active');
+        else l.classList.remove('active');
+      });
+    });
+  });
 
   // ==========================================================================
   // 12. App Bootstrapping
