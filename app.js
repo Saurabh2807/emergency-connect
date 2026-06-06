@@ -1,196 +1,248 @@
-/* ==========================================================================
-   Emergency Connect - Main Application Script (Logic & State)
-   ========================================================================== */
+// ==========================================================================
+// Emergency Connect - React Application (CDN Powered)
+// ==========================================================================
 
-document.addEventListener('DOMContentLoaded', () => {
-  // ==========================================================================
-  // 1. State Management
-  // ==========================================================================
-  let state = {
-    listings: [],
-    donors: [],
-    volunteers: [],
-    activities: [],
-    stats: {},
-    currentUser: null,
-    currentTheme: 'light',
-    activeTab: 'home',
-    systemLogs: [],
-    meshMode: false,
-    heatmapActive: false,
-    heatmapCircles: [],
-    activeRoute: null,
-    chatRecipient: null,
-    chats: {}
+const { useState, useEffect, useRef, useMemo } = React;
+
+function App() {
+  // --- State Variables ---
+  const [currentView, setCurrentView] = useState('#home');
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  const [city, setCity] = useState('Bhopal, MP');
+  const [mapCenter, setMapCenter] = useState([23.2599, 77.4126]);
+  
+  // Data State
+  const [listings, setListings] = useState([]);
+  const [donors, setDonors] = useState([]);
+  const [volunteers, setVolunteers] = useState([]);
+  const [activities, setActivities] = useState([]);
+  const [stats, setStats] = useState({ activeRequests: 0, resourcesAvailable: 0, volunteersOnline: 0, savedLives: 0 });
+  const [successStories, setSuccessStories] = useState([]);
+
+  // Mesh & Heatmap States
+  const [meshMode, setMeshMode] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(null);
+  const [heatmapActive, setHeatmapActive] = useState(false);
+  const [activeRoute, setActiveRoute] = useState(null);
+
+  // Search & Filters
+  const [citySearchInput, setCitySearchInput] = useState('');
+  const [resourceSearch, setResourceSearch] = useState('');
+  const [resourceTab, setResourceTab] = useState('all'); // 'all', 'request', 'offer'
+  const [resourceCategory, setResourceCategory] = useState('All');
+  const [bloodSearchGroup, setBloodSearchGroup] = useState('All');
+  const [volunteerSearch, setVolunteerSearch] = useState('');
+
+  // Modals and Drawers
+  const [isAddResourceOpen, setIsAddResourceOpen] = useState(false);
+  const [isAddVolunteerOpen, setIsAddVolunteerOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isSosOpen, setIsSosOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Active Chats State
+  const [chats, setChats] = useState({});
+  const [activeChat, setActiveChat] = useState(null); // { recipientId, name, avatar, text }
+
+  // Auth User
+  const [currentUser, setCurrentUser] = useState(
+    JSON.parse(localStorage.getItem('currentUser')) || { name: 'Amit Sharma', role: 'responder' }
+  );
+
+  // Notifications
+  const [toasts, setToasts] = useState([]);
+
+  // --- Refs ---
+  const mapContainerRef = useRef(null);
+  const leafletMapRef = useRef(null);
+  const markersGroupRef = useRef(null);
+  const routePolylineRef = useRef(null);
+  const heatmapCirclesRef = useRef([]);
+
+  // --- Toast Helper ---
+  const showToast = (title, message, type = 'info') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, title, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
   };
 
-  // Maps instances
-  let mainMap = null;
-  let mapMarkers = [];
-
-  // Helper to save state to LocalStorage
-  function saveState() {
-    localStorage.setItem('emergency_connect_state', JSON.stringify(state));
-  }
-
-  // Load state or load seed data if empty
-  function initStore() {
-    const localData = localStorage.getItem('emergency_connect_state');
-    if (localData) {
-      try {
-        state = JSON.parse(localData);
-      } catch (e) {
-        console.error("Error parsing local state, resetting to seed data", e);
-        state = JSON.parse(JSON.stringify(window.emergencySeedData));
-      }
-    } else {
-      state = JSON.parse(JSON.stringify(window.emergencySeedData));
+  // --- Initial Seed Load ---
+  useEffect(() => {
+    const seed = window.emergencySeedData;
+    if (seed) {
+      setListings(seed.listings);
+      setDonors(seed.donors);
+      setVolunteers(seed.volunteers);
+      setActivities(seed.activities);
+      setStats(seed.stats);
+      setSuccessStories(seed.successStories);
     }
-
-    // Safely restore/initialize new fields
-    state.meshMode = state.meshMode || false;
-    state.heatmapActive = state.heatmapActive || false;
-    state.heatmapCircles = [];
-    state.activeRoute = null;
-    state.chatRecipient = null;
-    state.chats = state.chats || {};
     
-    // Set default theme
-    state.currentTheme = localStorage.getItem('emergency_connect_theme') || 'light';
-    document.documentElement.setAttribute('data-theme', state.currentTheme);
-    updateThemeToggleUI();
-
-    // Restore Mesh Mode UI state on boot
-    const toggleBtn = document.getElementById('mesh-toggle-btn');
-    const banner = document.getElementById('mesh-status-banner');
-    if (state.meshMode && toggleBtn && banner) {
-      toggleBtn.classList.add('mesh-toggle-active');
-      toggleBtn.innerHTML = `<i data-lucide="wifi"></i>`;
-      banner.classList.add('active');
-    }
-
-    // Check session
-    const sessionUser = sessionStorage.getItem('emergency_connect_user');
-    if (sessionUser) {
-      state.currentUser = JSON.parse(sessionUser);
-    }
-  }
-
-  // Log message to Admin panel log simulator
-  function logSystemAction(message) {
-    const time = new Date().toLocaleTimeString();
-    const formattedLog = `[${time}] ${message}`;
-    state.systemLogs.unshift(formattedLog);
-    if (state.systemLogs.length > 30) state.systemLogs.pop();
-    
-    // Live update admin console log if active
-    const logContainer = document.getElementById('admin-log-panel');
-    if (logContainer) {
-      logContainer.innerHTML = state.systemLogs.map(log => `<div>${log}</div>`).join('');
-    }
-  }
-
-  // ==========================================================================
-  // 2. Navigation & Router
-  // ==========================================================================
-  const views = ['home', 'dashboard', 'resources', 'blood', 'volunteers', 'admin'];
-
-  function handleRoute() {
-    const hash = window.location.hash.replace('#', '') || 'home';
-    
-    if (views.includes(hash)) {
-      state.activeTab = hash;
-      
-      // Update Navigation active states
-      document.querySelectorAll('.nav-links a').forEach(link => {
-        if (link.getAttribute('href') === `#${hash}`) {
-          link.classList.add('active');
-        } else {
-          link.classList.remove('active');
-        }
-      });
-
-      // Update Sidebar active states (for dashboard subnavigation)
-      document.querySelectorAll('.sidebar-link').forEach(link => {
-        if (link.getAttribute('data-target') === hash) {
-          link.classList.add('active');
-        } else {
-          link.classList.remove('active');
-        }
-      });
-
-      // Swap views
-      document.querySelectorAll('.page-view').forEach(view => {
-        view.classList.remove('active');
-        if (view.id === `${hash}-page`) {
-          view.classList.add('active');
-        }
-      });
-
-      // Render view-specific elements
-      triggerViewRender(hash);
-      
-      // Scroll to top
+    // Hash Routing
+    const handleHash = () => {
+      const hash = window.location.hash || '#home';
+      setCurrentView(hash);
+      setMobileNavOpen(false);
       window.scrollTo(0, 0);
+    };
+    window.addEventListener('hashchange', handleHash);
+    handleHash();
+
+    // Dark Mode Theme Init
+    document.documentElement.setAttribute('data-theme', theme);
+
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  // --- Theme Toggle ---
+  const toggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    localStorage.setItem('theme', nextTheme);
+    document.documentElement.setAttribute('data-theme', nextTheme);
+    showToast('Theme Changed', `Switched to ${nextTheme === 'dark' ? 'Dark' : 'Light'} Mode`, 'info');
+  };
+
+  // --- dynamic mock data loader on city change ---
+  const loadCityData = (lat, lng, cityName) => {
+    setMapCenter([lat, lng]);
+    setCity(cityName);
+    setActiveRoute(null);
+
+    // Call helper function in data.js to generate mock items
+    if (window.generateMockDataForCity) {
+      const dynamicData = window.generateMockDataForCity(lat, lng, cityName);
+      setListings(dynamicData.listings);
+      setDonors(dynamicData.donors);
+      setVolunteers(dynamicData.volunteers);
+      setActivities(dynamicData.activities);
+      setStats(dynamicData.stats);
+      showToast('Map Relocated', `Loaded relief directory for ${cityName}`, 'success');
+      logActivity('CITY_CHANGE', `Map re-centered on ${cityName}`, `Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`);
     }
-  }
+  };
 
-  function triggerViewRender(view) {
-    // Shared Leaflet Map setup on Home and Dashboard
-    if (view === 'home') {
-      setTimeout(() => initLeafletMap('home-map', state.listings), 50);
-      renderLandingPageData();
-    } else if (view === 'dashboard') {
-      renderDashboard();
-    } else if (view === 'resources') {
-      renderListings();
-    } else if (view === 'blood') {
-      renderBloodDonors();
-    } else if (view === 'volunteers') {
-      renderVolunteers();
-    } else if (view === 'admin') {
-      renderAdmin();
-    }
-  }
+  // --- Nominatim Geocoding Search ---
+  const handleCitySearch = async (e) => {
+    e.preventDefault();
+    if (!citySearchInput.trim()) return;
 
-  window.addEventListener('hashchange', handleRoute);
+    showToast('Searching...', `Locating "${citySearchInput}" in India`, 'info');
 
-  // ==========================================================================
-  // 3. Leaflet Interactive Map Logic
-  // ==========================================================================
-  function initLeafletMap(elementId, itemsToShow) {
-    const mapElement = document.getElementById(elementId);
-    if (!mapElement) return;
-
-    // Reset markers and existing instance
-    if (mainMap) {
-      mainMap.remove();
-      mainMap = null;
-    }
-    mapMarkers = [];
-
-    // Center Bhopal, MP
-    mainMap = L.map(elementId, {
-      center: [23.2599, 77.4126],
-      zoom: 12.5,
-      zoomControl: true
-    });
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(mainMap);
-
-    // Custom styled icons using SVG wrappers
-    const createCustomIcon = (color, iconClass) => {
-      let iconSvg = '';
-      if (iconClass === 'alert') {
-        iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
-      } else if (iconClass === 'package') {
-        iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><polygon points="12 22.08 12 12 3 6.93 3 17.07 12 22.08"/><polygon points="12 22.08 12 12 21 6.93 21 17.07 12 22.08"/><polygon points="12 12 3 6.93 12 1.86 21 6.93 12 12"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`;
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=1&q=${encodeURIComponent(citySearchInput)}`
+      );
+      const data = await response.json();
+      
+      if (data && data.length > 0) {
+        const result = data[0];
+        const lat = parseFloat(result.lat);
+        const lng = parseFloat(result.lon);
+        const displayName = result.display_name.split(',')[0] + ", India";
+        loadCityData(lat, lng, displayName);
+        setCitySearchInput('');
       } else {
-        iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
-      }
+        // Fallback search in predefined major cities
+        const fallbackCities = {
+          "delhi": [28.6139, 77.2090, "New Delhi, DL"],
+          "mumbai": [19.0760, 72.8777, "Mumbai, MH"],
+          "bangalore": [12.9716, 77.5946, "Bangalore, KA"],
+          "pune": [18.5204, 73.8567, "Pune, MH"],
+          "kolkata": [22.5726, 88.3639, "Kolkata, WB"],
+          "hyderabad": [17.3850, 78.4867, "Hyderabad, TS"],
+          "chennai": [13.0827, 80.2707, "Chennai, TN"],
+          "indore": [22.7196, 75.8577, "Indore, MP"]
+        };
 
+        const queryLower = citySearchInput.toLowerCase().trim();
+        let foundFallback = false;
+        for (const k in fallbackCities) {
+          if (queryLower.includes(k)) {
+            const [flat, flng, fname] = fallbackCities[k];
+            loadCityData(flat, flng, fname);
+            setCitySearchInput('');
+            foundFallback = true;
+            break;
+          }
+        }
+
+        if (!foundFallback) {
+          showToast('Search Failed', 'Could not locate that city. Showing Bhopal standard view.', 'warning');
+        }
+      }
+    } catch (error) {
+      showToast('Search Error', 'Network geocoding failed. Try searching major cities.', 'warning');
+    }
+  };
+
+  // --- Add System Action Logger ---
+  const logActivity = (type, title, message) => {
+    const newAct = {
+      id: "act-" + Date.now(),
+      type,
+      title,
+      message,
+      timestamp: new Date().toISOString()
+    };
+    setActivities(prev => [newAct, ...prev]);
+  };
+
+  // --- Leaflet Map Render & Effect ---
+  useEffect(() => {
+    // If Map element exists and instance doesn't, initialize
+    if (mapContainerRef.current && !leafletMapRef.current) {
+      leafletMapRef.current = L.map(mapContainerRef.current, {
+        center: mapCenter,
+        zoom: 12.5,
+        zoomControl: true
+      });
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+      }).addTo(leafletMapRef.current);
+
+      markersGroupRef.current = L.layerGroup().addTo(leafletMapRef.current);
+
+      // Event listener for clicks on popup buttons
+      leafletMapRef.current.on('popupopen', (e) => {
+        const container = e.popup.getElement();
+        const coordBtn = container.querySelector('.coordinate-btn');
+        if (coordBtn) {
+          coordBtn.onclick = () => {
+            const id = coordBtn.getAttribute('data-id');
+            const item = listings.find(x => x.id === id);
+            if (item) handleCoordinateRoute(item.id, item.title, item.contact, [item.location.lat, item.location.lng]);
+          };
+        }
+        const volBtn = container.querySelector('.contact-vol-btn');
+        if (volBtn) {
+          volBtn.onclick = () => {
+            const id = volBtn.getAttribute('data-id');
+            const vol = volunteers.find(x => x.id === id);
+            if (vol) handleCoordinateRoute(vol.id, vol.name, vol.contact, [vol.lat, vol.lng]);
+          };
+        }
+      });
+    }
+
+    // Update center if it changed
+    if (leafletMapRef.current) {
+      leafletMapRef.current.setView(mapCenter, 12.5);
+    }
+  }, [mapCenter]);
+
+  // --- Update Markers, Heatmap, and Polylines on changes ---
+  useEffect(() => {
+    if (!leafletMapRef.current || !markersGroupRef.current) return;
+
+    // Clear markers
+    markersGroupRef.current.clearLayers();
+
+    // Custom Icons
+    const createCustomIcon = (color, svgPath) => {
       return L.divIcon({
         className: 'custom-map-marker',
         html: `
@@ -208,1487 +260,1286 @@ document.addEventListener('DOMContentLoaded', () => {
             transform: translate(-10px, -10px);
             transition: all 0.2s ease;
           ">
-            ${iconSvg}
+            ${svgPath}
           </div>
-        `,
-        iconSize: [38, 38],
-        iconAnchor: [19, 38]
+        `
       });
     };
 
-    // Render Request & Offer pins
-    itemsToShow.forEach(item => {
-      if (!item.location || !item.location.lat) return;
-      
-      const color = item.type === 'request' ? 'var(--color-danger)' : 'var(--color-success)';
-      const iconType = item.type === 'request' ? 'alert' : 'package';
-      
+    const alertIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+    const packageIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><polygon points="12 22.08 12 12 3 6.93 3 17.07 12 22.08"/><polygon points="12 22.08 12 12 21 6.93 21 17.07 12 22.08"/><polygon points="12 12 3 6.93 12 1.86 21 6.93 12 12"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`;
+    const userIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+
+    // Add Listing Markers
+    listings.forEach(item => {
+      if (item.status === 'resolved') return;
+      const isRequest = item.type === 'request';
+      const color = isRequest ? 'var(--color-danger)' : 'var(--color-success)';
       const marker = L.marker([item.location.lat, item.location.lng], {
-        icon: createCustomIcon(color, iconType)
-      }).addTo(mainMap);
+        icon: createCustomIcon(color, isRequest ? alertIconSvg : packageIconSvg)
+      });
 
-      const popupContent = `
-        <div style="font-family: var(--font-body); padding: 5px; min-width: 180px;">
-          <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 999px; margin-bottom: 6px; display: inline-block;
-            background: ${item.type === 'request' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)'};
-            color: ${item.type === 'request' ? 'var(--color-danger)' : 'var(--color-success)'};">
-            ${item.type.toUpperCase()} • ${item.urgency.toUpperCase()}
+      const popupHtml = `
+        <div style="font-family: inherit; width: 220px; padding: 4px;">
+          <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 999px; margin-bottom: 6px; display: inline-block; background: ${isRequest ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)'}; color: ${color};">
+            ${item.category} (${isRequest ? 'Request' : 'Offer'})
           </span>
-          <h4 style="font-size: 14px; margin-bottom: 6px; font-family: var(--font-display);">${item.title}</h4>
-          <p style="font-size: 12px; color: #64748B; margin-bottom: 8px;">${item.description}</p>
-          <div style="font-size: 11px; margin-bottom: 4px;"><strong>Location:</strong> ${item.location.address}</div>
-          <div style="font-size: 11px; margin-bottom: 10px;"><strong>Contact:</strong> ${item.contact}</div>
-          <button class="btn btn-primary coordinate-btn" data-id="${item.id}" style="font-size: 11px; padding: 6px 12px; width: 100%; text-transform: none; font-weight:600;">Coordinate Assistance</button>
+          <h4 style="font-size: 13px; margin: 4px 0 6px 0; font-weight: 700; color: var(--text-main);">${item.title}</h4>
+          <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 10px 0;">📍 ${item.location.address}</p>
+          <button class="btn btn-primary coordinate-btn" data-id="${item.id}" style="font-size: 11px; padding: 6px 12px; width: 100%; font-weight:600;">Coordinate Assistance</button>
         </div>
       `;
-
-      marker.bindPopup(popupContent);
-      mapMarkers.push(marker);
+      marker.bindPopup(popupHtml);
+      markersGroupRef.current.addLayer(marker);
     });
 
-    // Render Volunteers pins (blue markers)
-    state.volunteers.forEach(vol => {
-      if (!vol.lat) return;
+    // Add Volunteer Markers
+    volunteers.forEach(vol => {
+      if (vol.availability !== 'available') return;
       const marker = L.marker([vol.lat, vol.lng], {
-        icon: createCustomIcon('var(--color-primary)', 'user')
-      }).addTo(mainMap);
+        icon: createCustomIcon('var(--color-primary)', userIconSvg)
+      });
 
-      const popupContent = `
-        <div style="font-family: var(--font-body); padding: 5px; min-width: 180px;">
+      const popupHtml = `
+        <div style="font-family: inherit; width: 200px; padding: 4px;">
           <span style="font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 999px; background: rgba(37, 99, 235, 0.15); color: var(--color-primary); margin-bottom: 6px; display: inline-block;">
-            VOLUNTEER (${vol.availability.toUpperCase()})
+            Active Responder
           </span>
-          <h4 style="font-size: 14px; margin-bottom: 6px; font-family: var(--font-display);">${vol.name}</h4>
-          <p style="font-size: 12px; color: #64748B; margin-bottom: 4px;"><strong>Skills:</strong> ${vol.skills.join(', ')}</p>
-          <p style="font-size: 12px; color: #64748B; margin-bottom: 8px;"><strong>Coverage:</strong> ${vol.serviceArea}</p>
-          <div style="font-size: 11px; margin-bottom: 10px;"><strong>Contact:</strong> ${vol.contact}</div>
-          <button class="btn btn-success contact-vol-btn" data-id="${vol.id}" style="font-size: 11px; padding: 6px 12px; width: 100%;">Dispatch Volunteer</button>
+          <h4 style="font-size: 13px; margin: 4px 0; font-weight: 700; color: var(--text-main);">${vol.name}</h4>
+          <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 4px 0;">🛠️ ${vol.skills.slice(0, 2).join(', ')}</p>
+          <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 10px 0;">📍 ${vol.serviceArea}</p>
+          <button class="btn btn-primary contact-vol-btn" data-id="${vol.id}" style="font-size: 11px; padding: 6px 12px; width: 100%; font-weight:600;">Dispatch to Current Event</button>
         </div>
       `;
-      marker.bindPopup(popupContent);
-      mapMarkers.push(marker);
+      marker.bindPopup(popupHtml);
+      markersGroupRef.current.addLayer(marker);
     });
 
-    // Redraw active routes if map is recreated
-    if (state.activeRoute && state.activeRoute.coords) {
-      drawDeliveryRoute(state.activeRoute.coords[0], state.activeRoute.coords[1]);
-    }
+    // Handle Heatmap Overlay Circles
+    heatmapCirclesRef.current.forEach(c => leafletMapRef.current.removeLayer(c));
+    heatmapCirclesRef.current = [];
 
-    // Redraw heatmap circles if active
-    if (state.heatmapActive) {
-      renderHeatmap();
-    }
-  }
-
-  // Handle Action Clicks Inside Map Popups
-  document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('coordinate-btn')) {
-      const listingId = e.target.getAttribute('data-id');
-      const item = state.listings.find(x => x.id === listingId);
-      if (item) {
-        const userLoc = [23.2599, 77.4126]; // Bhopal Center Mock
-        const destLoc = [item.location.lat, item.location.lng];
-        drawDeliveryRoute(userLoc, destLoc);
-        
-        openChatDrawer(
-          item.id,
-          item.contact.split('(')[1]?.replace(')', '') || 'Dispatcher',
-          'SC',
-          destLoc[0],
-          destLoc[1],
-          `Hello! I see your request for: "${item.title}". I am ready to coordinate and help.`
-        );
-        logSystemAction(`User initiated coordination for listing ID: ${listingId}`);
-      }
-    }
-    if (e.target.classList.contains('contact-vol-btn')) {
-      const volId = e.target.getAttribute('data-id');
-      const vol = state.volunteers.find(x => x.id === volId);
-      if (vol) {
-        const userLoc = [23.2599, 77.4126];
-        const destLoc = [vol.lat, vol.lng];
-        drawDeliveryRoute(userLoc, destLoc);
-        
-        openChatDrawer(
-          vol.id,
-          vol.name,
-          vol.name.split(' ').map(n=>n[0]).join(''),
-          destLoc[0],
-          destLoc[1],
-          `Emergency dispatcher calling Volunteer ${vol.name}. Dispatching rescue route coordinates now.`
-        );
-        logSystemAction(`Volunteer ${vol.name} dispatched to current active incident.`);
-      }
-    }
-  });
-
-  // ==========================================================================
-  // 4. View Rendering Systems
-  // ==========================================================================
-
-  // A. Landing Page Logic
-  function renderLandingPageData() {
-    // Render Statistics numbers
-    document.getElementById('stat-active-req').innerText = state.stats.activeRequests || window.emergencySeedData.stats.activeRequests;
-    document.getElementById('stat-res-avail').innerText = state.stats.resourcesAvailable || window.emergencySeedData.stats.resourcesAvailable;
-    document.getElementById('stat-vols-online').innerText = state.stats.volunteersOnline || window.emergencySeedData.stats.volunteersOnline;
-    document.getElementById('stat-lives-saved').innerText = state.stats.savedLives || window.emergencySeedData.stats.savedLives;
-
-    // Render Nearby Resources list column
-    const nearbyList = document.getElementById('nearby-list-container');
-    if (nearbyList) {
-      const activeListings = state.listings.filter(x => x.status === 'pending' || x.status === 'available').slice(0, 5);
-      nearbyList.innerHTML = activeListings.map(item => `
-        <div class="nearby-card" data-lat="${item.location.lat}" data-lng="${item.location.lng}">
-          <div class="nearby-header flex align-center justify-between">
-            <span class="badge ${item.type === 'request' ? 'badge-request' : 'badge-offer'}">${item.type.toUpperCase()}</span>
-            <span class="badge badge-${item.urgency}">${item.urgency.toUpperCase()}</span>
-          </div>
-          <h4 class="nearby-title">${item.title}</h4>
-          <div class="nearby-meta flex align-center">
-            <span class="flex align-center gap-sm">
-              <i data-lucide="map-pin" style="width: 12px; height: 12px;"></i>
-              ${item.location.address.split(',')[0]}
-            </span>
-            <span>Qty: ${item.quantity}</span>
-          </div>
-        </div>
-      `).join('');
-      lucide.createIcons();
-
-      // Nearby Card Navigation on Map Click
-      nearbyList.querySelectorAll('.nearby-card').forEach(card => {
-        card.addEventListener('click', () => {
-          const lat = parseFloat(card.getAttribute('data-lat'));
-          const lng = parseFloat(card.getAttribute('data-lng'));
-          if (mainMap) {
-            mainMap.setView([lat, lng], 15);
-            // Highlight marker
-            mapMarkers.forEach(m => {
-              if (m.getLatLng().lat === lat && m.getLatLng().lng === lng) {
-                m.openPopup();
-              }
-            });
-          }
-        });
-      });
-    }
-
-    // Render Success Stories
-    const storiesContainer = document.getElementById('success-stories-container');
-    if (storiesContainer && state.successStories) {
-      storiesContainer.innerHTML = state.successStories.map(story => `
-        <div class="glass-card story-card">
-          <div class="flex flex-column justify-between" style="height: 100%;">
-            <div>
-              <span class="section-badge badge-primary-soft" style="margin-bottom: 12px;">${story.category}</span>
-              <h3 style="font-size: 20px; margin-bottom: 14px;">${story.title}</h3>
-              <p class="story-text">"${story.story}"</p>
-            </div>
-            <div style="border-top: 1px solid var(--border-color); padding-top: 14px; margin-top: 14px;">
-              <p class="story-author">${story.author}</p>
-            </div>
-          </div>
-        </div>
-      `).join('');
-    }
-  }
-
-  // B. Emergency Dashboard
-  function renderDashboard() {
-    // Fill Dashboard stats
-    document.getElementById('db-active-req').innerText = state.listings.filter(x => x.type === 'request' && x.status === 'pending').length;
-    document.getElementById('db-avail-res').innerText = state.listings.filter(x => x.type === 'offer' && x.status === 'available').length;
-    document.getElementById('db-total-vols').innerText = state.volunteers.length;
-
-    // Render mini interactive map for quick monitoring
-    setTimeout(() => initLeafletMap('db-mini-map', state.listings), 50);
-
-    // Render Live Activity Logs
-    const logFeed = document.getElementById('db-activity-feed');
-    if (logFeed) {
-      logFeed.innerHTML = state.activities.map(act => {
-        let icon = 'alert-triangle';
-        let colorClass = 'red';
-        if (act.type === 'match_found') { icon = 'check-circle'; colorClass = 'green'; }
-        if (act.type === 'volunteer_registered') { icon = 'user-check'; colorClass = 'blue'; }
-        if (act.type === 'offer_created') { icon = 'package'; colorClass = 'green'; }
-        
-        const timeFormatted = new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-        return `
-          <div class="activity-item">
-            <div class="activity-badge-circle" style="background: rgba(var(--color-${colorClass}-rgb), 0.15); color: var(--color-${colorClass});">
-              <i data-lucide="${icon}" style="width: 18px; height: 18px;"></i>
-            </div>
-            <div class="toast-content">
-              <p class="activity-title-text">${act.title}</p>
-              <p class="activity-desc-text">${act.message}</p>
-              <p class="activity-time">${timeFormatted}</p>
-            </div>
-          </div>
-        `;
-      }).join('');
-      lucide.createIcons();
-    }
-
-    // Render dashboard requests summary
-    const reqList = document.getElementById('db-active-requests-list');
-    if (reqList) {
-      const activeRequests = state.listings.filter(x => x.type === 'request' && x.status === 'pending').slice(0, 4);
-      if (activeRequests.length === 0) {
-        reqList.innerHTML = `<p style="padding: 20px; color: var(--text-muted); text-align: center;">No active requests right now.</p>`;
-      } else {
-        reqList.innerHTML = activeRequests.map(req => `
-          <div class="donor-item flex align-center justify-between" style="padding: 12px 16px;">
-            <div>
-              <h4 style="font-size: 14px;">${req.title}</h4>
-              <p style="font-size: 12px; color: var(--text-muted);">${req.location.address}</p>
-            </div>
-            <div class="flex align-center gap-md">
-              <span class="badge badge-${req.urgency}">${req.urgency.toUpperCase()}</span>
-              <button class="btn btn-secondary coordinate-btn" data-id="${req.id}" style="padding: 6px 12px; font-size: 12px;">Coordinate</button>
-            </div>
-          </div>
-        `).join('');
-      }
-    }
-  }
-
-  // C. Resource Directory List view with filters
-  function renderListings() {
-    const searchVal = document.getElementById('search-resource-input').value.toLowerCase();
-    const typeVal = document.getElementById('filter-type-select').value;
-    const catVal = document.getElementById('filter-category-select').value;
-    const urgencyVal = document.getElementById('filter-urgency-select').value;
-
-    const filtered = state.listings.filter(item => {
-      const matchesSearch = item.title.toLowerCase().includes(searchVal) || item.description.toLowerCase().includes(searchVal) || item.location.address.toLowerCase().includes(searchVal);
-      const matchesType = typeVal === 'all' || item.type === typeVal;
-      const matchesCat = catVal === 'all' || item.category === catVal;
-      const matchesUrgency = urgencyVal === 'all' || item.urgency === urgencyVal;
-      return matchesSearch && matchesType && matchesCat && matchesUrgency;
-    });
-
-    const listingsGrid = document.getElementById('listings-grid-container');
-    if (!listingsGrid) return;
-
-    if (filtered.length === 0) {
-      listingsGrid.innerHTML = `
-        <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--text-muted);">
-          <i data-lucide="inbox" style="width: 48px; height: 48px; margin-bottom: 16px;"></i>
-          <h3>No matching resources found</h3>
-          <p>Try modifying your filters or search criteria.</p>
-        </div>
-      `;
-      lucide.createIcons();
-      return;
-    }
-
-    listingsGrid.innerHTML = filtered.map(item => {
-      const isOwner = state.currentUser && (state.currentUser.id === item.userId || state.currentUser.role === 'admin');
-      let footerActionBtn = `<button class="btn btn-primary coordinate-btn" data-id="${item.id}" style="font-size: 13px; flex: 1;">Coordinate Help</button>`;
-      
-      if (isOwner) {
-        footerActionBtn = `
-          <button class="btn btn-success mark-complete-btn" data-id="${item.id}" style="font-size: 13px; flex: 1;">Mark Fulfilled</button>
-          <button class="btn btn-outline delete-listing-btn" data-id="${item.id}" style="padding: 10px; width: 42px;"><i data-lucide="trash-2" style="width: 16px; height: 16px; color: var(--color-danger);"></i></button>
-        `;
-      }
-
-      // Check for Smart Matches
-      let suggestedMatchesHTML = '';
-      if (item.type === 'request' && item.status === 'pending') {
-        const matches = state.listings.filter(x => x.type === 'offer' && x.category === item.category && x.status === 'available');
-        if (matches.length > 0) {
-          suggestedMatchesHTML = `
-            <div class="smart-match-container">
-              <div style="font-size: 12px; font-weight: 700; color: var(--color-success); margin-bottom: 8px;" class="flex align-center gap-sm">
-                <i data-lucide="sparkles" style="width: 14px; height: 14px;"></i> Smart Matches Available (${matches.length})
-              </div>
-              <div class="flex flex-column gap-sm">
-                ${matches.map(m => `
-                  <div class="match-card flex align-center justify-between">
-                    <div>
-                      <div style="font-size: 12px; font-weight: 600;">${m.title}</div>
-                      <div style="font-size: 10px; color: var(--text-muted);">📍 ${m.location.address.split(',')[0]}</div>
-                    </div>
-                    <button class="btn btn-success match-connect-btn" data-req-id="${item.id}" data-off-id="${m.id}" style="padding: 4px 10px; font-size: 11px; border-radius: 6px; width:auto;">
-                      Match
-                    </button>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          `;
-        }
-      }
-
-      return `
-        <div class="glass-card listing-card" style="padding: 24px;">
-          <div class="flex align-center justify-between" style="margin-bottom: 12px;">
-            <span class="badge ${item.type === 'request' ? 'badge-request' : 'badge-offer'}">${item.type.toUpperCase()}</span>
-            <span class="badge badge-${item.urgency}">${item.urgency.toUpperCase()}</span>
-          </div>
-          <div>
-            <span style="font-size: 11px; color: var(--text-muted); font-weight:700;">${item.category}</span>
-            <h3 class="listing-title" style="margin-top: 4px;">${item.title}</h3>
-            <p class="listing-desc">${item.description}</p>
-          </div>
-          
-          <div class="listing-body">
-            <div class="listing-meta-item">
-              <i data-lucide="map-pin" style="width: 14px; height: 14px;"></i>
-              <span title="${item.location.address}">${item.location.address}</span>
-            </div>
-            <div class="listing-meta-item">
-              <i data-lucide="phone" style="width: 14px; height: 14px;"></i>
-              <span>${item.contact}</span>
-            </div>
-            <div class="listing-meta-item">
-              <i data-lucide="package" style="width: 14px; height: 14px;"></i>
-              <span>Quantity: ${item.quantity} (${item.status})</span>
-            </div>
-            ${suggestedMatchesHTML}
-          </div>
-
-          <div class="listing-footer flex gap-sm align-center">
-            ${footerActionBtn}
-          </div>
-        </div>
-      `;
-    }).join('');
-    lucide.createIcons();
-    attachListingActionListeners();
-  }
-
-  function attachListingActionListeners() {
-    document.querySelectorAll('.mark-complete-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-id');
-        const listing = state.listings.find(x => x.id === id);
-        if (listing) {
-          listing.status = 'fulfilled';
-          // Move from active requests to analytics stats
-          state.stats.savedLives = (state.stats.savedLives || 1204) + 1;
-          saveState();
-          showToast("Listing Fulfilled", `Resource request for '${listing.title}' has been successfully completed!`, "success");
-          logSystemAction(`Listing fulfilled: ${listing.title} (ID: ${id})`);
-          renderListings();
+    if (heatmapActive) {
+      // Draw distress zones around unresolved request items
+      listings.forEach(item => {
+        if (item.type === 'request' && item.urgency === 'critical' && item.status !== 'resolved') {
+          const circle = L.circle([item.location.lat, item.location.lng], {
+            color: 'red',
+            fillColor: '#f03',
+            fillOpacity: 0.35,
+            radius: 400
+          }).addTo(leafletMapRef.current);
+          heatmapCirclesRef.current.push(circle);
         }
       });
-    });
-
-    document.querySelectorAll('.delete-listing-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-id');
-        const index = state.listings.findIndex(x => x.id === id);
-        if (index > -1) {
-          const title = state.listings[index].title;
-          state.listings.splice(index, 1);
-          saveState();
-          showToast("Listing Deleted", `Removed listing '${title}' from system databases.`, "info");
-          logSystemAction(`Listing deleted: ${title} (ID: ${id})`);
-          renderListings();
-        }
-      });
-    });
-
-    document.querySelectorAll('.match-connect-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const reqId = btn.getAttribute('data-req-id');
-        const offId = btn.getAttribute('data-off-id');
-        const req = state.listings.find(x => x.id === reqId);
-        const off = state.listings.find(x => x.id === offId);
-        
-        if (req && off) {
-          req.status = 'fulfilled';
-          off.status = 'fulfilled';
-          state.stats.savedLives = (state.stats.savedLives || 1204) + 1;
-          saveState();
-          
-          showToast("Match Connected!", `Successfully matched request with offer! Route is mapped on your console.`, "success");
-          logSystemAction(`Smart Match linked: [REQUEST] ${req.title} with [OFFER] ${off.title}`);
-          
-          // Draw route on map between the two matched resources
-          drawDeliveryRoute([off.location.lat, off.location.lng], [req.location.lat, req.location.lng]);
-          
-          // Open coordination chat
-          openChatDrawer(
-            req.id,
-            req.contact.split('(')[1]?.replace(')', '') || 'Citizen in distress',
-            'SC',
-            req.location.lat,
-            req.location.lng,
-            `Match alert! We have connected your request with Hope Kitchen NGO's offer: "${off.title}". Coordination route mapped.`
-          );
-          
-          renderListings();
-        }
-      });
-    });
-  }
-
-  // D. Blood Donation Module
-  let selectedBloodGroup = 'O-';
-  function renderBloodDonors() {
-    const listContainer = document.getElementById('blood-donors-list');
-    if (!listContainer) return;
-
-    // Filter donors matching selected group
-    const filteredDonors = state.donors.filter(donor => donor.bloodGroup === selectedBloodGroup);
-
-    // Update active visual tags
-    document.querySelectorAll('.blood-group-selector').forEach(sel => {
-      if (sel.getAttribute('data-group') === selectedBloodGroup) {
-        sel.classList.add('active');
-      } else {
-        sel.classList.remove('active');
-      }
-    });
-
-    if (filteredDonors.length === 0) {
-      listContainer.innerHTML = `
-        <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-          <p>No available donors listed for ${selectedBloodGroup} at this time.</p>
-        </div>
-      `;
-      return;
     }
 
-    listContainer.innerHTML = filteredDonors.map(donor => `
-      <div class="donor-item flex align-center justify-between">
-        <div class="flex align-center gap-md">
-          <div class="donor-initials">${donor.name.split(' ').map(n=>n[0]).join('')}</div>
-          <div>
-            <h4 style="font-size: 15px; margin-bottom: 2px;">${donor.name}</h4>
-            <p style="font-size: 12px; color: var(--text-muted);">
-              <i data-lucide="map-pin" style="width: 12px; height: 12px; display:inline-block; margin-right: 4px;"></i>
-              ${donor.location}
-            </p>
-          </div>
-        </div>
-        <div class="flex align-center gap-md">
-          <span class="badge ${donor.available ? 'badge-success-soft' : 'badge-danger-soft'}">
-            ${donor.available ? 'Available Now' : 'Busy'}
-          </span>
-          <a href="tel:${donor.phone}" class="btn btn-primary" style="padding: 6px 12px; font-size: 12px;">
-            <i data-lucide="phone" style="width: 14px; height: 14px;"></i> Call Donor
-          </a>
-        </div>
-      </div>
-    `).join('');
-    lucide.createIcons();
-  }
-
-  // Setup click listeners for blood group selectors
-  document.querySelectorAll('.blood-group-selector').forEach(sel => {
-    sel.addEventListener('click', () => {
-      selectedBloodGroup = sel.getAttribute('data-group');
-      renderBloodDonors();
-    });
-  });
-
-  // E. Volunteer Network View
-  function renderVolunteers() {
-    const volGrid = document.getElementById('volunteers-grid');
-    const searchVal = document.getElementById('search-vol-input').value.toLowerCase();
-    
-    if (!volGrid) return;
-
-    const filtered = state.volunteers.filter(vol => {
-      const matchSearch = vol.name.toLowerCase().includes(searchVal) || 
-                          vol.skills.some(s => s.toLowerCase().includes(searchVal)) || 
-                          vol.serviceArea.toLowerCase().includes(searchVal);
-      return matchSearch;
-    });
-
-    if (filtered.length === 0) {
-      volGrid.innerHTML = `
-        <div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: var(--text-muted);">
-          <p>No volunteers found matching your query.</p>
-        </div>
-      `;
-      return;
-    }
-
-    volGrid.innerHTML = filtered.map(vol => `
-      <div class="glass-card" style="padding: 24px;">
-        <div class="flex align-center justify-between" style="margin-bottom: 16px;">
-          <div class="flex align-center gap-md">
-            <div class="donor-initials" style="background: rgba(37,99,235,0.1); color: var(--color-primary);">
-              ${vol.name.split(' ').map(n=>n[0]).join('')}
-            </div>
-            <div>
-              <h4 style="font-size: 16px;">${vol.name}</h4>
-              <p style="font-size: 12px; color: var(--text-muted);">${vol.serviceArea}</p>
-            </div>
-          </div>
-          <span class="badge ${vol.availability === 'available' ? 'badge-success-soft' : 'badge-danger-soft'}">
-            ${vol.availability}
-          </span>
-        </div>
-        
-        <div style="margin-bottom: 16px;">
-          <h5 style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Skills</h5>
-          <div class="flex" style="flex-wrap: wrap; gap: 6px;">
-            ${vol.skills.map(skill => `<span style="font-size: 11px; background: var(--bg-card-hover); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">${skill}</span>`).join('')}
-          </div>
-        </div>
-
-        <div class="flex gap-sm" style="border-top: 1px solid var(--border-color); padding-top: 16px;">
-          <a href="tel:${vol.contact}" class="btn btn-primary" style="flex: 1; font-size: 13px;">
-            <i data-lucide="phone" style="width: 14px; height: 14px;"></i> Call
-          </a>
-          <button class="btn btn-outline contact-vol-btn" data-id="${vol.id}" style="flex: 1; font-size: 13px;">Dispatch</button>
-        </div>
-      </div>
-    `).join('');
-    lucide.createIcons();
-  }
-
-  // Attach volunteer search listeners
-  const volSearchInput = document.getElementById('search-vol-input');
-  if (volSearchInput) {
-    volSearchInput.addEventListener('input', renderVolunteers);
-  }
-
-  // F. Admin Dashboard View
-  function renderAdmin() {
-    // Total numbers
-    document.getElementById('adm-total-users').innerText = "142";
-    document.getElementById('adm-active-listings').innerText = state.listings.length;
-    document.getElementById('adm-active-vols').innerText = state.volunteers.length;
-    document.getElementById('adm-flagged-items').innerText = "0";
-
-    // Fill Console Logs
-    const logContainer = document.getElementById('admin-log-panel');
-    if (logContainer) {
-      logContainer.innerHTML = state.systemLogs.map(log => `<div>${log}</div>`).join('');
-    }
-
-    // Fill Listings Table
-    const listingsTable = document.getElementById('adm-listings-tbody');
-    if (listingsTable) {
-      listingsTable.innerHTML = state.listings.map(item => `
-        <tr>
-          <td style="font-weight: 700;">${item.title}</td>
-          <td><span class="badge ${item.type === 'request' ? 'badge-request' : 'badge-offer'}">${item.type}</span></td>
-          <td>${item.category}</td>
-          <td><span class="badge badge-${item.urgency}">${item.urgency}</span></td>
-          <td>
-            <button class="btn btn-secondary adm-delete-listing" data-id="${item.id}" style="padding: 6px 12px; font-size: 12px;">Delete</button>
-          </td>
-        </tr>
-      `).join('');
-
-      document.querySelectorAll('.adm-delete-listing').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const id = btn.getAttribute('data-id');
-          const index = state.listings.findIndex(x => x.id === id);
-          if (index > -1) {
-            const title = state.listings[index].title;
-            state.listings.splice(index, 1);
-            saveState();
-            showToast("Admin Action", `Removed listing '${title}' from index databases.`, "warning");
-            logSystemAction(`Admin deleted listing: ${title}`);
-            renderAdmin();
-          }
-        });
-      });
-    }
-  }
-
-  // Search input listeners for Resources page
-  const searchResInput = document.getElementById('search-resource-input');
-  if (searchResInput) {
-    searchResInput.addEventListener('input', renderListings);
-  }
-  const filterTypeSelect = document.getElementById('filter-type-select');
-  if (filterTypeSelect) {
-    filterTypeSelect.addEventListener('change', renderListings);
-  }
-  const filterCatSelect = document.getElementById('filter-category-select');
-  if (filterCatSelect) {
-    filterCatSelect.addEventListener('change', renderListings);
-  }
-  const filterUrgencySelect = document.getElementById('filter-urgency-select');
-  if (filterUrgencySelect) {
-    filterUrgencySelect.addEventListener('change', renderListings);
-  }
-
-  // ==========================================================================
-  // 5. Authentication Simulators
-  // ==========================================================================
-  const authModal = document.getElementById('auth-modal');
-  const userBtn = document.getElementById('user-menu-btn');
-  const closeAuthBtn = document.getElementById('close-auth-modal');
-  
-  function updateAuthHeader() {
-    const userContainer = document.getElementById('nav-user-container');
-    const guestContainer = document.getElementById('nav-guest-container');
-    const adminLink = document.getElementById('admin-nav-link');
-    
-    if (state.currentUser) {
-      guestContainer.style.display = 'none';
-      userContainer.style.display = 'flex';
-      
-      const initials = state.currentUser.name.split(' ').map(n=>n[0]).join('');
-      document.getElementById('user-initials-avatar').innerText = initials;
-      document.getElementById('user-name-display').innerText = state.currentUser.name;
-
-      if (state.currentUser.role === 'admin') {
-        adminLink.style.display = 'inline-block';
-      } else {
-        adminLink.style.display = 'none';
-      }
-    } else {
-      guestContainer.style.display = 'flex';
-      userContainer.style.display = 'none';
-      adminLink.style.display = 'none';
-    }
-  }
-
-  // Open login
-  if (userBtn) {
-    userBtn.addEventListener('click', () => {
-      authModal.classList.add('active');
-    });
-  }
-  if (closeAuthBtn) {
-    closeAuthBtn.addEventListener('click', () => {
-      authModal.classList.remove('active');
-    });
-  }
-
-  // Switch Auth Tab
-  const signupForm = document.getElementById('auth-signup-form');
-  const loginForm = document.getElementById('auth-login-form');
-  const tabLogin = document.getElementById('auth-tab-login');
-  const tabSignup = document.getElementById('auth-tab-signup');
-
-  if (tabLogin && tabSignup) {
-    tabLogin.addEventListener('click', () => {
-      tabLogin.style.borderBottom = '2px solid var(--color-primary)';
-      tabSignup.style.borderBottom = '2px solid transparent';
-      loginForm.style.display = 'block';
-      signupForm.style.display = 'none';
-    });
-    tabSignup.addEventListener('click', () => {
-      tabSignup.style.borderBottom = '2px solid var(--color-primary)';
-      tabLogin.style.borderBottom = '2px solid transparent';
-      loginForm.style.display = 'none';
-      signupForm.style.display = 'block';
-    });
-  }
-
-  // Login execution
-  if (loginForm) {
-    loginForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const email = document.getElementById('login-email').value;
-      let name = email.split('@')[0];
-      name = name.charAt(0).toUpperCase() + name.slice(1);
-      
-      const role = email.includes('admin') ? 'admin' : 'user';
-
-      state.currentUser = {
-        name: name,
-        email: email,
-        id: "usr-" + Date.now(),
-        role: role
-      };
-
-      sessionStorage.setItem('emergency_connect_user', JSON.stringify(state.currentUser));
-      authModal.classList.remove('active');
-      updateAuthHeader();
-      showToast("Signed In Successfully", `Welcome back, ${state.currentUser.name}!`, "success");
-      logSystemAction(`User signed in: ${state.currentUser.email} (Role: ${state.currentUser.role})`);
-      
-      if (role === 'admin') {
-        window.location.hash = '#admin';
-      } else {
-        window.location.hash = '#dashboard';
-      }
-    });
-  }
-
-  // Signup execution
-  if (signupForm) {
-    signupForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const name = document.getElementById('signup-name').value;
-      const email = document.getElementById('signup-email').value;
-
-      state.currentUser = {
-        name: name,
-        email: email,
-        id: "usr-" + Date.now(),
-        role: 'user'
-      };
-
-      sessionStorage.setItem('emergency_connect_user', JSON.stringify(state.currentUser));
-      authModal.classList.remove('active');
-      updateAuthHeader();
-      showToast("Account Created", `Welcome, ${state.currentUser.name}!`, "success");
-      logSystemAction(`New user signed up: ${state.currentUser.email}`);
-      window.location.hash = '#dashboard';
-    });
-  }
-
-  // Google Login simulator
-  const googleBtn = document.getElementById('google-auth-btn');
-  if (googleBtn) {
-    googleBtn.addEventListener('click', () => {
-      googleBtn.innerHTML = `<i data-lucide="loader" style="animation: spin 1s infinite linear;"></i> Connecting Google...`;
-      lucide.createIcons();
-
-      setTimeout(() => {
-        state.currentUser = {
-          name: "Saurabh Dev",
-          email: "saurabh@hackathon.org",
-          id: "usr-google-1",
-          role: "admin" // Automatically register user as Admin to explore the complete experience!
-        };
-        sessionStorage.setItem('emergency_connect_user', JSON.stringify(state.currentUser));
-        authModal.classList.remove('active');
-        googleBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chrome"><circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-16.88 5.85m19.5 1.9c-3.5-.49-11.05 1-11.6 8.56"/></svg> Continue with Google`;
-        updateAuthHeader();
-        showToast("Google Authentication", "Successfully authorized via Google. Administrator role assigned.", "success");
-        logSystemAction("Google Auth completed successfully.");
-        window.location.hash = '#admin';
-      }, 1200);
-    });
-  }
-
-  // Log out action
-  const logoutBtn = document.getElementById('logout-btn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
-      logSystemAction(`User logged out: ${state.currentUser.email}`);
-      state.currentUser = null;
-      sessionStorage.removeItem('emergency_connect_user');
-      updateAuthHeader();
-      showToast("Signed Out", "You have been logged out of the session.", "info");
-      window.location.hash = '#home';
-    });
-  }
-
-  // ==========================================================================
-  // 6. SOS Button Logic
-  // ==========================================================================
-  const sosTriggerModal = document.getElementById('sos-modal');
-  const sosCloseBtn = document.getElementById('close-sos-modal');
-  const triggerSosConfirm = document.getElementById('trigger-sos-confirm');
-
-  // Nav/Landing SOS click opens confirmation
-  document.querySelectorAll('.trigger-sos-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      sosTriggerModal.classList.add('active');
-    });
-  });
-
-  if (sosCloseBtn) {
-    sosCloseBtn.addEventListener('click', () => {
-      sosTriggerModal.classList.remove('remove');
-      sosTriggerModal.classList.remove('active');
-    });
-  }
-
-  // Confirm SOS triggering
-  if (triggerSosConfirm) {
-    triggerSosConfirm.addEventListener('click', () => {
-      const sosDescription = document.getElementById('sos-incident-desc').value || "SOS Alert: Immediate assistance required.";
-      const sosContact = document.getElementById('sos-contact-phone').value || "+1 (555) 911-HELP";
-      
-      // Select mock coordinates in Bhopal centered around the user location to put on the map
-      const bhopalCenters = [
-        { address: "Lake View Road, Bhopal", lat: 23.2492, lng: 77.3888 },
-        { address: "DB Mall, MP Nagar, Bhopal", lat: 23.2325, lng: 77.4326 },
-        { address: "New Market, TT Nagar, Bhopal", lat: 23.2415, lng: 77.4018 },
-        { address: "Van Vihar Road, Bhopal", lat: 23.2384, lng: 77.3685 }
-      ];
-      const selectedLoc = bhopalCenters[Math.floor(Math.random() * bhopalCenters.length)];
-
-      const newSos = {
-        id: "sos-" + Date.now(),
-        title: "SOS: EMERGENCY ALERT DISPATCHED",
-        category: "Volunteers",
-        type: "request",
-        description: sosDescription,
-        location: {
-          address: selectedLoc.address,
-          lat: selectedLoc.lat,
-          lng: selectedLoc.lng
-        },
-        contact: sosContact,
-        urgency: "critical",
-        quantity: 1,
-        status: "pending",
-        timestamp: new Date().toISOString(),
-        userId: state.currentUser ? state.currentUser.id : "guest-sos"
-      };
-
-      // Push to front of listings
-      state.listings.unshift(newSos);
-      
-      // Update stats
-      state.stats.activeRequests = (state.stats.activeRequests || 43) + 1;
-
-      // Add to activities
-      state.activities.unshift({
-        id: "act-sos-" + Date.now(),
-        type: "sos_alert",
-        title: "CRITICAL SOS ALERT",
-        message: `${sosDescription} Near ${selectedLoc.address}`,
-        timestamp: new Date().toISOString()
-      });
-
-      saveState();
-      
-      sosTriggerModal.classList.remove('active');
-      showToast("SOS Beacon Active", "Emergency requests have been pushed to all volunteer nodes.", "danger");
-      logSystemAction(`CRITICAL SOS Alert created in system: ${selectedLoc.address}`);
-
-      // Route to dashboard to see it
-      window.location.hash = '#dashboard';
-    });
-  }
-
-  // ==========================================================================
-  // 7. Create Resources Request/Offer Logic
-  // ==========================================================================
-  const addResourceModal = document.getElementById('add-resource-modal');
-  const closeResourceBtn = document.getElementById('close-resource-modal');
-  const resourceForm = document.getElementById('create-resource-form');
-
-  document.querySelectorAll('.open-add-resource-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      // Set type based on action button
-      const type = btn.getAttribute('data-type') || 'request';
-      document.getElementById('res-type-select').value = type;
-      addResourceModal.classList.add('active');
-    });
-  });
-
-  if (closeResourceBtn) {
-    closeResourceBtn.addEventListener('click', () => {
-      addResourceModal.classList.remove('active');
-    });
-  }
-
-  if (resourceForm) {
-    resourceForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      
-      const title = document.getElementById('res-title').value;
-      const type = document.getElementById('res-type-select').value;
-      const category = document.getElementById('res-category').value;
-      const urgency = document.getElementById('res-urgency').value;
-      const quantity = parseInt(document.getElementById('res-qty').value);
-      const address = document.getElementById('res-address').value;
-      const contact = document.getElementById('res-contact').value;
-      const description = document.getElementById('res-desc').value;
-
-      // Generate random lat/lng around Bhopal to show on map
-      const lat = 23.16 + Math.random() * 0.12;
-      const lng = 77.35 + Math.random() * 0.12;
-
-      const newListing = {
-        id: "list-" + Date.now(),
-        title: title,
-        category: category,
-        type: type,
-        description: description,
-        location: { address, lat, lng },
-        contact: contact,
-        urgency: urgency,
-        quantity: quantity,
-        status: type === 'request' ? 'pending' : 'available',
-        timestamp: new Date().toISOString(),
-        userId: state.currentUser ? state.currentUser.id : "guest-user"
-      };
-
-      state.listings.unshift(newListing);
-      
-      // Update statistics
-      if (type === 'request') {
-        state.stats.activeRequests = (state.stats.activeRequests || 43) + 1;
-      } else {
-        state.stats.resourcesAvailable = (state.stats.resourcesAvailable || 128) + 1;
-      }
-
-      // Record Activity
-      state.activities.unshift({
-        id: "act-res-" + Date.now(),
-        type: type === 'request' ? 'request_created' : 'offer_created',
-        title: type === 'request' ? 'Request Published' : 'Resource Offered',
-        message: `${title} (${category}) listed in ${address.split(',')[0]}`,
-        timestamp: new Date().toISOString()
-      });
-
-      saveState();
-      addResourceModal.classList.remove('active');
-      resourceForm.reset();
-      
-      showToast("Listing Published", `Your ${type} has been uploaded to the Live Directory.`, "success");
-      logSystemAction(`New Listing uploaded: [${type.toUpperCase()}] ${title}`);
-
-      // Refresh pages
-      triggerViewRender(state.activeTab);
-    });
-  }
-
-  // ==========================================================================
-  // 8. Register Volunteer Logic
-  // ==========================================================================
-  const volModal = document.getElementById('volunteer-modal');
-  const closeVolBtn = document.getElementById('close-volunteer-modal');
-  const volForm = document.getElementById('register-volunteer-form');
-
-  document.querySelectorAll('.open-volunteer-modal-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      volModal.classList.add('active');
-    });
-  });
-
-  if (closeVolBtn) {
-    closeVolBtn.addEventListener('click', () => {
-      volModal.classList.remove('active');
-    });
-  }
-
-  if (volForm) {
-    volForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-
-      const name = document.getElementById('vol-name').value;
-      const contact = document.getElementById('vol-phone').value;
-      const serviceArea = document.getElementById('vol-area').value;
-      
-      // Skills parsing
-      const skillsChecked = [];
-      document.querySelectorAll('.vol-skill-chk:checked').forEach(chk => {
-        skillsChecked.push(chk.value);
-      });
-
-      if (skillsChecked.length === 0) {
-        showToast("Registration Error", "Please select at least one skill to register.", "warning");
-        return;
-      }
-
-      // Random position in Bhopal
-      const lat = 23.16 + Math.random() * 0.12;
-      const lng = 77.35 + Math.random() * 0.12;
-
-      const newVol = {
-        id: "vol-" + Date.now(),
-        name: name,
-        skills: skillsChecked,
-        availability: 'available',
-        serviceArea: serviceArea,
-        contact: contact,
-        lat: lat,
-        lng: lng
-      };
-
-      state.volunteers.unshift(newVol);
-      state.stats.volunteersOnline = (state.stats.volunteersOnline || 87) + 1;
-
-      state.activities.unshift({
-        id: "act-vol-" + Date.now(),
-        type: "volunteer_registered",
-        title: "Volunteer Node Online",
-        message: `${name} has registered to support ${serviceArea}`,
-        timestamp: new Date().toISOString()
-      });
-
-      saveState();
-      volModal.classList.remove('active');
-      volForm.reset();
-
-      showToast("Registration Completed", "You are now active on the Emergency Connect volunteer mesh network.", "success");
-      logSystemAction(`Volunteer Registered: ${name} (Skills: ${skillsChecked.join(', ')})`);
-
-      // Refresh views
-      triggerViewRender(state.activeTab);
-    });
-  }
-
-  // ==========================================================================
-  // 9. Toast Notification System
-  // ==========================================================================
-  const toastContainer = document.getElementById('toast-wrapper');
-  
-  function showToast(title, message, type = 'primary') {
-    if (!toastContainer) return;
-
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    
-    let icon = 'bell';
-    if (type === 'danger') icon = 'alert-octagon';
-    if (type === 'success') icon = 'check-circle';
-    if (type === 'warning') icon = 'alert-triangle';
-
-    toast.innerHTML = `
-      <div class="toast-icon">
-        <i data-lucide="${icon}" style="width: 16px; height: 16px;"></i>
-      </div>
-      <div class="toast-content">
-        <div class="toast-title">${title}</div>
-        <div class="toast-message">${message}</div>
-      </div>
-    `;
-
-    toastContainer.appendChild(toast);
-    lucide.createIcons();
-
-    // Trigger sliding animation
-    setTimeout(() => toast.classList.add('active'), 50);
-
-    // Auto dismiss after 4 seconds
+    // Trigger Lucide Icon rendering
     setTimeout(() => {
-      toast.classList.remove('active');
-      setTimeout(() => toast.remove(), 400);
-    }, 4000);
-  }
+      if (window.lucide) window.lucide.createIcons();
+    }, 100);
 
-  // Expose toast function to global window so it can be called elsewhere
-  window.triggerToast = showToast;
+  }, [listings, volunteers, heatmapActive]);
 
-  // ==========================================================================
-  // 10. Dynamic Real-Time Simulation Engine (Hackathon Wow Factor)
-  // ==========================================================================
-  const simulationEvents = [
-    {
-      title: "Automated Resource Match",
-      message: "Emergency Transport listed by Marcus Vance matches 'Need Temporary Shelter' request in Sunset.",
-      type: "success"
-    },
-    {
-      title: "New Medicine Offer",
-      message: "NGO 'Health Shield' uploaded 10 boxes of first-aid supplies in Richmond.",
-      type: "success"
-    },
-    {
-      title: "Blood Donor Update",
-      message: "Priya Patel (A+) confirmed availability for emergency dispatch.",
-      type: "primary"
-    },
-    {
-      title: "Volunteer Grid Active",
-      message: "Volunteer node Carlos Ortega is coordinating food relief kits.",
-      type: "primary"
-    },
-    {
-      title: "Urgent: Water Crisis Request",
-      message: "FEMA reports shelter sector 3 requires immediate drinking water delivery.",
-      type: "warning"
+  // --- Handle active routing ---
+  useEffect(() => {
+    if (!leafletMapRef.current) return;
+
+    if (routePolylineRef.current) {
+      leafletMapRef.current.removeLayer(routePolylineRef.current);
+      routePolylineRef.current = null;
     }
-  ];
 
-  function runSimulator() {
-    // Fire dynamic events every 45-60 seconds to simulate a live, heavily populated network
-    setInterval(() => {
-      // Pick random simulated event
-      const eventIndex = Math.floor(Math.random() * simulationEvents.length);
-      const ev = simulationEvents[eventIndex];
-      
-      // Update activity logs
-      state.activities.unshift({
-        id: "act-sim-" + Date.now(),
-        type: "match_found",
-        title: ev.title,
-        message: ev.message,
-        timestamp: new Date().toISOString()
-      });
+    if (activeRoute) {
+      routePolylineRef.current = L.polyline(activeRoute.coords, {
+        color: 'var(--color-primary)',
+        weight: 4.5,
+        dashArray: '8, 12',
+        opacity: 0.85
+      }).addTo(leafletMapRef.current);
 
-      // Save to localStorage
-      saveState();
-
-      // Dispatch real-time toast notification
-      showToast(ev.title, ev.message, ev.type);
-      logSystemAction(`Simulation dispatcher fired: ${ev.title} - ${ev.message}`);
-
-      // Refresh active view to reflect data updates
-      if (state.activeTab === 'dashboard') {
-        renderDashboard();
-      }
-    }, 45000); // 45 seconds
-  }
-
-  // ==========================================================================
-  // 11. Theme Management (Light/Dark Mode)
-  // ==========================================================================
-  const themeToggleBtn = document.getElementById('theme-toggle-btn');
-  
-  function updateThemeToggleUI() {
-    if (!themeToggleBtn) return;
-    const isDark = state.currentTheme === 'dark';
-    themeToggleBtn.innerHTML = isDark ? 
-      `<i data-lucide="sun" style="width: 20px; height: 20px;"></i>` : 
-      `<i data-lucide="moon" style="width: 20px; height: 20px;"></i>`;
-    lucide.createIcons();
-  }
-
-  if (themeToggleBtn) {
-    themeToggleBtn.addEventListener('click', () => {
-      state.currentTheme = state.currentTheme === 'light' ? 'dark' : 'light';
-      localStorage.setItem('emergency_connect_theme', state.currentTheme);
-      document.documentElement.setAttribute('data-theme', state.currentTheme);
-      updateThemeToggleUI();
-      logSystemAction(`Theme swapped to: ${state.currentTheme}`);
-    });
-  }
-
-  // ==========================================================================
-  // 10.1 Offline Mesh Network Logic
-  // ==========================================================================
-  const meshToggleBtn = document.getElementById('mesh-toggle-btn');
-  const meshStatusBanner = document.getElementById('mesh-status-banner');
-  const meshSyncBtn = document.getElementById('mesh-sync-btn');
-  
-  if (meshToggleBtn) {
-    meshToggleBtn.addEventListener('click', () => {
-      state.meshMode = !state.meshMode;
-      localStorage.setItem('emergency_connect_mesh', state.meshMode);
-      
-      if (state.meshMode) {
-        meshToggleBtn.classList.add('mesh-toggle-active');
-        meshToggleBtn.innerHTML = `<i data-lucide="wifi"></i>`;
-        meshStatusBanner.classList.add('active');
-        showToast("Offline Mesh Active", "Connected via local peer-to-peer mesh. Cellular backup online.", "warning");
-        logSystemAction("Mesh network peering activated. Listening for offline nodes.");
-      } else {
-        meshToggleBtn.classList.remove('mesh-toggle-active');
-        meshToggleBtn.innerHTML = `<i data-lucide="wifi-off"></i>`;
-        meshStatusBanner.classList.remove('active');
-        showToast("Online Mode Active", "Broadband sync restored with global FEMA servers.", "success");
-        logSystemAction("Global DNS synchronization restored. Mesh standby active.");
-      }
-      lucide.createIcons();
-    });
-  }
-  
-  if (meshSyncBtn) {
-    meshSyncBtn.addEventListener('click', () => {
-      meshSyncBtn.disabled = true;
-      meshSyncBtn.style.opacity = '0.5';
-      const progressDiv = document.getElementById('mesh-sync-progress');
-      const progressFill = document.getElementById('mesh-sync-progress-fill');
-      progressDiv.style.display = 'inline-block';
-      progressFill.style.width = '0%';
-      
-      let width = 0;
-      const interval = setInterval(() => {
-        width += 10;
-        progressFill.style.width = width + '%';
-        if (width >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            progressDiv.style.display = 'none';
-            meshSyncBtn.disabled = false;
-            meshSyncBtn.style.opacity = '1';
-            
-            // Add mock listings from peer node sync
-            const mockPeerListings = [
-              {
-                id: "list-mesh-1",
-                title: "[Mesh-Node] Food Request in Sector 4",
-                category: "Food Packets",
-                type: "request",
-                description: "Urgent need for 10 water bottles and food packets at community base point.",
-                location: { address: "MP Nagar, Bhopal, MP", lat: 23.2323, lng: 77.4318 },
-                contact: "+91 94220 99887 (Node-B5)",
-                urgency: "high",
-                quantity: 10,
-                status: "pending",
-                timestamp: new Date().toISOString(),
-                userId: "mesh-node-b5"
-              },
-              {
-                id: "list-mesh-2",
-                title: "[Mesh-Node] Available: Transport Jeep",
-                category: "Emergency Transport",
-                type: "offer",
-                description: "Heavy logistics vehicle with high water clearance, ready to dispatch.",
-                location: { address: "Kolar Road, Bhopal, MP", lat: 23.1690, lng: 77.4172 },
-                contact: "+91 91311 00223 (Node-Kolar-A)",
-                urgency: "medium",
-                quantity: 1,
-                status: "available",
-                timestamp: new Date().toISOString(),
-                userId: "mesh-node-kolar"
-              }
-            ];
-            
-            state.listings.unshift(...mockPeerListings);
-            state.stats.activeRequests += 1;
-            state.stats.resourcesAvailable += 1;
-            
-            state.activities.unshift({
-              id: "act-mesh-sync-" + Date.now(),
-              type: "offer_created",
-              title: "Mesh Data Synchronized",
-              message: "Merged database updates with Sunset-A and Richmond-B5 local peer groups.",
-              timestamp: new Date().toISOString()
-            });
-            
-            saveState();
-            showToast("Sync Successful", "Merged 2 new requests/offers from local RF nodes.", "success");
-            logSystemAction("Offline database merge complete. Mapped 2 new mesh listings.");
-            
-            // Refresh
-            triggerViewRender(state.activeTab);
-          }, 400);
-        }
-      }, 150);
-    });
-  }
-
-  // ==========================================================================
-  // 10.2 Leaflet Polyline Routing Logic
-  // ==========================================================================
-  function drawDeliveryRoute(fromLatLng, toLatLng) {
-    if (!mainMap) return;
-    
-    if (state.activeRoute && state.activeRoute.line) {
-      mainMap.removeLayer(state.activeRoute.line);
+      leafletMapRef.current.fitBounds(routePolylineRef.current.getBounds(), { padding: [40, 40] });
     }
+  }, [activeRoute]);
+
+  // --- Dispatch Routing Helper ---
+  const handleCoordinateRoute = (recipientId, name, contactStr, destCoords) => {
+    // Current user location centered mock
+    const userLoc = [mapCenter[0], mapCenter[1]];
+    setActiveRoute({
+      id: recipientId,
+      coords: [userLoc, destCoords]
+    });
+
+    // Extract names and format
+    const nameOnly = name || contactStr.split('(')[1]?.replace(')', '') || 'Dispatcher';
+    const initMessage = `Hello! I am dispatched to coordinate emergency support for: "${name}". Mapping routing path now.`;
     
-    const line = L.polyline([fromLatLng, toLatLng], {
-      color: 'var(--color-primary)',
-      weight: 5,
-      dashArray: '10, 10',
-      opacity: 0.8
-    }).addTo(mainMap);
-    
-    // Fit map bounds to show route
-    mainMap.fitBounds(L.latLngBounds([fromLatLng, toLatLng]), { padding: [50, 50] });
-    
-    state.activeRoute = {
-      coords: [fromLatLng, toLatLng],
-      line: line
+    openChat(recipientId, nameOnly, initMessage);
+    showToast('Delivery Path Dispatched', `Polyline route generated on console map.`, 'success');
+  };
+
+  // --- Chat Messaging Controllers ---
+  const openChat = (recipientId, name, initialMsgText) => {
+    const avatar = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+    setActiveChat({
+      recipientId,
+      name,
+      avatar,
+      status: 'Online via Mesh'
+    });
+
+    // Init chat list history if empty
+    if (!chats[recipientId]) {
+      setChats(prev => ({
+        ...prev,
+        [recipientId]: [
+          { sender: 'received', text: initialMsgText || "Connected to coordination mesh.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+        ]
+      }));
+    }
+  };
+
+  const sendChatMessage = (text) => {
+    if (!activeChat || !text.trim()) return;
+    const recipientId = activeChat.recipientId;
+
+    const userMsg = {
+      sender: 'sent',
+      text: text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
-  }
-  
-  function clearDeliveryRoute() {
-    if (mainMap && state.activeRoute && state.activeRoute.line) {
-      mainMap.removeLayer(state.activeRoute.line);
-    }
-    state.activeRoute = null;
-  }
 
-  // ==========================================================================
-  // 10.3 Distress Hotspots Heatmap Logic
-  // ==========================================================================
-  function renderHeatmap() {
-    if (!mainMap) return;
-    clearHeatmap();
-    
-    // Calculate hotspots based on critical/high listings
-    state.listings.forEach(item => {
-      if (item.type === 'request' && item.status === 'pending' && (item.urgency === 'critical' || item.urgency === 'high')) {
-        const circle = L.circle([item.location.lat, item.location.lng], {
-          radius: 500,
-          color: 'var(--color-danger)',
-          fillColor: 'var(--color-danger)',
-          fillOpacity: 0.18,
-          stroke: false
-        }).addTo(mainMap);
-        state.heatmapCircles.push(circle);
-      }
-    });
-  }
-  
-  function clearHeatmap() {
-    if (mainMap && state.heatmapCircles.length > 0) {
-      state.heatmapCircles.forEach(c => mainMap.removeLayer(c));
-    }
-    state.heatmapCircles = [];
-  }
-  
-  function toggleHeatmap(homeBtn, dbBtn) {
-    state.heatmapActive = !state.heatmapActive;
-    
-    const updateBtnStyle = (btn) => {
-      if (!btn) return;
-      if (state.heatmapActive) {
-        btn.classList.add('mesh-toggle-active'); // Re-use mesh highlight
-      } else {
-        btn.classList.remove('mesh-toggle-active');
-      }
-    };
-    
-    updateBtnStyle(homeBtn);
-    updateBtnStyle(dbBtn);
-    
-    if (state.heatmapActive) {
-      renderHeatmap();
-      showToast("Distress Heatmap Active", "Hotspots showing high critical request densities.", "danger");
-      logSystemAction("Distress hotspot overlay enabled on map.");
-    } else {
-      clearHeatmap();
-      showToast("Heatmap Overlay Off", "Cleared critical hotspot layers.", "info");
-      logSystemAction("Distress hotspot overlay disabled.");
-    }
-  }
+    setChats(prev => ({
+      ...prev,
+      [recipientId]: [...(prev[recipientId] || []), userMsg]
+    }));
 
-  const homeHeatmapToggle = document.getElementById('home-heatmap-toggle');
-  const dbHeatmapToggle = document.getElementById('db-heatmap-toggle');
-  
-  if (homeHeatmapToggle) {
-    homeHeatmapToggle.addEventListener('click', () => {
-      toggleHeatmap(homeHeatmapToggle, dbHeatmapToggle);
-    });
-  }
-  
-  if (dbHeatmapToggle) {
-    dbHeatmapToggle.addEventListener('click', () => {
-      toggleHeatmap(homeHeatmapToggle, dbHeatmapToggle);
-    });
-  }
+    logActivity('MESSAGE_SENT', `Direct peer communication with ${activeChat.name}`, `Sent message: "${text}"`);
 
-  // ==========================================================================
-  // 10.4 Live Coordination Chat Logic
-  // ==========================================================================
-  const chatDrawer = document.getElementById('coordination-chat-drawer');
-  const closeChatBtn = document.getElementById('close-chat-drawer');
-  const chatForm = document.getElementById('chat-send-form');
-  const chatInput = document.getElementById('chat-text-input');
-  const chatMessagesContainer = document.getElementById('chat-messages-container');
-  
-  function openChatDrawer(recipientId, name, avatar, targetLat, targetLng, initialMsg) {
-    state.chatRecipient = { id: recipientId, name: name, avatar: avatar, lat: targetLat, lng: targetLng };
-    
-    document.getElementById('chat-recipient-avatar').innerText = avatar;
-    document.getElementById('chat-recipient-name').innerText = name;
-    
-    // Initialize chat session if empty
-    if (!state.chats[recipientId]) {
-      state.chats[recipientId] = [
-        { sender: 'received', text: `Hi! This is ${name}. Thanks for reaching out. Let me know how we can coordinate.`, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }
-      ];
-      if (initialMsg) {
-        state.chats[recipientId].push({ sender: 'sent', text: initialMsg, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
-      }
-    }
-    
-    renderChatMessages();
-    chatDrawer.classList.add('active');
-  }
-  
-  if (closeChatBtn) {
-    closeChatBtn.addEventListener('click', () => {
-      chatDrawer.classList.remove('active');
-      clearDeliveryRoute();
-    });
-  }
-  
-  function renderChatMessages() {
-    if (!state.chatRecipient) return;
-    const messages = state.chats[state.chatRecipient.id] || [];
-    
-    chatMessagesContainer.innerHTML = messages.map(msg => `
-      <div class="chat-bubble ${msg.sender}">
-        <div>${msg.text}</div>
-        <div class="chat-bubble-time">${msg.time}</div>
-      </div>
-    `).join('');
-    
-    chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
-  }
-  
-  window.sendQuickReply = function(text) {
-    if (!state.chatRecipient) return;
-    const recipientId = state.chatRecipient.id;
-    const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-    
-    state.chats[recipientId].push({ sender: 'sent', text: text, time: time });
-    renderChatMessages();
-    
-    // Sim reply from simulated user after 1.5 seconds
+    // Simulated Auto response after 1.5 seconds
     setTimeout(() => {
       const responses = [
-        "Sounds good. Coordinates confirmed.",
-        "Thank you! Will wait for you here.",
-        "Understood. We are preparing the node.",
-        "Copy that. Keeping channels open."
+        "Received. Initiating logistics transfer.",
+        "Understood. Moving vehicle to the target coordinates.",
+        "Coordinates synchronized. Secure communication channel established.",
+        "Acknowledged. Items have been prepped for staging."
       ];
-      const reply = responses[Math.floor(Math.random() * responses.length)];
-      state.chats[recipientId].push({ sender: 'received', text: reply, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
-      renderChatMessages();
-      showToast("Incoming Coordination Update", `Message from ${state.chatRecipient.name}`, "primary");
+      const replyText = responses[Math.floor(Math.random() * responses.length)];
+
+      const systemReply = {
+        sender: 'received',
+        text: replyText,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      setChats(prev => ({
+        ...prev,
+        [recipientId]: [...(prev[recipientId] || []), systemReply]
+      }));
+      showToast('New Message', `Received reply from ${activeChat.name}`, 'info');
     }, 1500);
   };
-  
-  if (chatForm) {
-    chatForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const text = chatInput.value.trim();
-      if (!text) return;
-      
-      const recipientId = state.chatRecipient.id;
-      const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-      
-      state.chats[recipientId].push({ sender: 'sent', text: text, time: time });
-      chatInput.value = '';
-      renderChatMessages();
-      
-      // Simulated answer
-      setTimeout(() => {
-        state.chats[recipientId].push({ sender: 'received', text: "Received message on mesh. Standing by.", time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
-        renderChatMessages();
-      }, 1500);
-    });
-  }
 
-  // ==========================================================================
-  // 10.5 Mobile Nav Drawer Logic
-  // ==========================================================================
-  const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
-  const closeMobileMenu = document.getElementById('close-mobile-menu');
-  const mobileNavDrawer = document.getElementById('mobile-nav-drawer');
-  const mobileNavBackdrop = document.getElementById('mobile-nav-backdrop');
-  
-  if (mobileMenuToggle) {
-    mobileMenuToggle.addEventListener('click', () => {
-      mobileNavDrawer.classList.add('active');
-      mobileNavBackdrop.classList.add('active');
-    });
-  }
-  
-  const closeMenu = () => {
-    mobileNavDrawer.classList.remove('active');
-    mobileNavBackdrop.classList.remove('active');
+  // --- Offline P2P Mesh Mode Simulation ---
+  const handleMeshToggle = () => {
+    const nextMesh = !meshMode;
+    setMeshMode(nextMesh);
+    if (nextMesh) {
+      showToast('Mesh Link Connected', 'Simulating connection via peer-to-peer RF mesh nodes', 'warning');
+      logActivity('MESH_CONNECTED', 'P2P RF Link Activated', 'Local routing tables updated.');
+    } else {
+      showToast('Cellular Mode Active', 'Switched back to standard internet network grids', 'info');
+      logActivity('MESH_DISCONNECTED', 'Cellular Mode Restored', 'Switched off local peer discovery.');
+    }
   };
-  
-  if (closeMobileMenu) {
-    closeMobileMenu.addEventListener('click', closeMenu);
-  }
-  if (mobileNavBackdrop) {
-    mobileNavBackdrop.addEventListener('click', closeMenu);
-  }
-  
-  document.querySelectorAll('.mobile-links a').forEach(link => {
-    link.addEventListener('click', (e) => {
-      const hash = link.getAttribute('href');
-      closeMenu();
-      
-      document.querySelectorAll('.mobile-links a').forEach(l => {
-        if (l.getAttribute('href') === hash) l.classList.add('active');
-        else l.classList.remove('active');
-      });
-    });
-  });
 
-  // ==========================================================================
-  // 12. App Bootstrapping
-  // ==========================================================================
-  initStore();
-  updateAuthHeader();
-  handleRoute();
-  runSimulator();
-  logSystemAction("Emergency Connect Network online. Verification checks passed.");
-});
+  const runPeerSync = () => {
+    if (syncProgress !== null) return;
+    setSyncProgress(0);
+    showToast('Syncing Databases', 'Syncing peer records from mesh network...', 'info');
+
+    let current = 0;
+    const interval = setInterval(() => {
+      current += 10;
+      setSyncProgress(current);
+      if (current >= 100) {
+        clearInterval(interval);
+        setSyncProgress(null);
+
+        // Add 2 mock localized listings centered in the searched city
+        const meshListings = [
+          {
+            id: "list-mesh-1",
+            title: "[Mesh-Node] Food Request in Sector 4",
+            category: "Food Packets",
+            type: "request",
+            description: "Urgent need for 10 water bottles and food packets at community base point.",
+            location: { address: `Sector 4, ${city}`, lat: mapCenter[0] + 0.015, lng: mapCenter[1] - 0.01 },
+            contact: "+91 94220 99887 (Node-B5)",
+            urgency: "high",
+            quantity: 10,
+            status: "pending",
+            timestamp: new Date().toISOString(),
+            userId: "mesh-node-b5"
+          },
+          {
+            id: "list-mesh-2",
+            title: "[Mesh-Node] Available: Transport Jeep",
+            category: "Emergency Transport",
+            type: "offer",
+            description: "Heavy logistics vehicle with high water clearance, ready to dispatch.",
+            location: { address: `Central Area, ${city}`, lat: mapCenter[0] - 0.02, lng: mapCenter[1] + 0.015 },
+            contact: "+91 91311 00223 (Node-Sunset-A)",
+            urgency: "medium",
+            quantity: 1,
+            status: "available",
+            timestamp: new Date().toISOString(),
+            userId: "mesh-node-sunset"
+          }
+        ];
+
+        setListings(prev => [meshListings[0], meshListings[1], ...prev]);
+        setStats(prev => ({
+          ...prev,
+          activeRequests: prev.activeRequests + 1,
+          resourcesAvailable: prev.resourcesAvailable + 1
+        }));
+        showToast('Sync Complete', 'Successfully integrated 2 new peer records.', 'success');
+        logActivity('MESH_SYNC', 'Database Synchronized', 'Merged Node-B5 and Node-Sunset-A records.');
+      }
+    }, 200);
+  };
+
+  // --- Add Resource Form Submission ---
+  const handleAddResourceSubmit = (e) => {
+    e.preventDefault();
+    const dataObj = new FormData(e.target);
+    
+    // Spread coordinates around mapCenter
+    const lat = mapCenter[0] + ((Math.random() - 0.5) * 0.06);
+    const lng = mapCenter[1] + ((Math.random() - 0.5) * 0.06);
+
+    const newListing = {
+      id: "list-" + Date.now(),
+      title: dataObj.get('title'),
+      category: dataObj.get('category'),
+      type: dataObj.get('type'),
+      description: dataObj.get('desc'),
+      location: {
+        address: dataObj.get('address'),
+        lat,
+        lng
+      },
+      contact: dataObj.get('contact'),
+      urgency: dataObj.get('urgency') || 'medium',
+      quantity: parseInt(dataObj.get('qty')) || 1,
+      status: dataObj.get('type') === 'request' ? 'pending' : 'available',
+      timestamp: new Date().toISOString(),
+      userId: "user-current"
+    };
+
+    setListings(prev => [newListing, ...prev]);
+    setIsAddResourceOpen(false);
+    showToast('Listing Created', `Successfully posted: ${newListing.title}`, 'success');
+    logActivity('OFFER_CREATED', 'New Resource Listed', `${newListing.title} published in ${city}.`);
+  };
+
+  // --- Add Volunteer Form Submission ---
+  const handleAddVolunteerSubmit = (e) => {
+    e.preventDefault();
+    const dataObj = new FormData(e.target);
+    
+    // Collect active checked skills
+    const skillsChecked = [];
+    e.target.querySelectorAll('.vol-skill-chk:checked').forEach(chk => {
+      skillsChecked.push(chk.value);
+    });
+
+    if (skillsChecked.length === 0) {
+      showToast('Validation Error', 'Select at least one response skill.', 'warning');
+      return;
+    }
+
+    const lat = mapCenter[0] + ((Math.random() - 0.5) * 0.05);
+    const lng = mapCenter[1] + ((Math.random() - 0.5) * 0.05);
+
+    const newVol = {
+      id: "vol-" + Date.now(),
+      name: dataObj.get('name'),
+      skills: skillsChecked,
+      availability: 'available',
+      serviceArea: dataObj.get('area'),
+      contact: dataObj.get('phone'),
+      lat,
+      lng
+    };
+
+    setVolunteers(prev => [newVol, ...prev]);
+    setIsAddVolunteerOpen(false);
+    showToast('Responder Registered', `Welcome to the network, ${newVol.name}!`, 'success');
+    logActivity('VOLUNTEER_REGISTERED', 'Responder Node Online', `${newVol.name} registered skills: ${skillsChecked.join(', ')}`);
+  };
+
+  // --- SOS Confirmed Trigger ---
+  const handleSosConfirm = (e) => {
+    e.preventDefault();
+    const dataObj = new FormData(e.target);
+
+    // Spawns immediately near mapCenter
+    const lat = mapCenter[0] + ((Math.random() - 0.5) * 0.02);
+    const lng = mapCenter[1] + ((Math.random() - 0.5) * 0.02);
+
+    const newSos = {
+      id: "sos-" + Date.now(),
+      title: "🚨 SOS: IMMEDIATE RESCUE NEEDED",
+      category: "Volunteers",
+      type: "request",
+      description: dataObj.get('desc') || 'Critical distress alert. SOS beacon triggered.',
+      location: {
+        address: `Incident point, ${city}`,
+        lat,
+        lng
+      },
+      contact: dataObj.get('phone') || '+91 99999 99999',
+      urgency: 'critical',
+      quantity: 1,
+      status: 'pending',
+      timestamp: new Date().toISOString(),
+      userId: 'user-critical'
+    };
+
+    setListings(prev => [newSos, ...prev]);
+    setIsSosOpen(false);
+    showToast('SOS Broadcasted', 'Distress beacons transmitted to all local peer nodes.', 'warning');
+    logActivity('SOS_ALERT', 'CRITICAL SOS ALERT TRANSMITTED', `Beacon active at coordinates: [${lat.toFixed(4)}, ${lng.toFixed(4)}]`);
+  };
+
+  // --- Match Smart Connection Resolve ---
+  const handleSmartMatch = (requestId, offerId) => {
+    setListings(prev => prev.map(item => {
+      if (item.id === requestId || item.id === offerId) {
+        return { ...item, status: 'resolved' };
+      }
+      return item;
+    }));
+
+    const reqItem = listings.find(x => x.id === requestId);
+    const offerItem = listings.find(x => x.id === offerId);
+
+    if (reqItem && offerItem) {
+      // Connect coordinates route
+      setActiveRoute({
+        id: requestId,
+        coords: [
+          [reqItem.location.lat, reqItem.location.lng],
+          [offerItem.location.lat, offerItem.location.lng]
+        ]
+      });
+
+      // Trigger chat coordination with offer provider
+      const receiverName = offerItem.contact.split('(')[1]?.replace(')', '') || 'Aid Provider';
+      openChat(offerId, receiverName, `Smart Match Found! I see your offer matches request: "${reqItem.title}". Generating optimal routing path.`);
+
+      setStats(prev => ({
+        ...prev,
+        activeRequests: Math.max(0, prev.activeRequests - 1),
+        savedLives: prev.savedLives + 3
+      }));
+
+      showToast('Smart Match Synced', 'Successfully linked aid request with matching provider!', 'success');
+      logActivity('MATCH_RESOLVED', 'Smart Match Connected', `Request: "${reqItem.title}" matched with Offer: "${offerItem.title}". Route is drawn.`);
+    }
+  };
+
+  // --- Filtering computations ---
+  const filteredListings = useMemo(() => {
+    return listings.filter(item => {
+      // Type Tab Filter
+      if (resourceTab === 'request' && item.type !== 'request') return false;
+      if (resourceTab === 'offer' && item.type !== 'offer') return false;
+
+      // Category filter
+      if (resourceCategory !== 'All' && item.category !== resourceCategory) return false;
+
+      // Search Query filter
+      if (resourceSearch.trim()) {
+        const query = resourceSearch.toLowerCase();
+        const matchesTitle = item.title.toLowerCase().includes(query);
+        const matchesDesc = item.description.toLowerCase().includes(query);
+        const matchesArea = item.location.address.toLowerCase().includes(query);
+        return matchesTitle || matchesDesc || matchesArea;
+      }
+
+      return true;
+    });
+  }, [listings, resourceTab, resourceCategory, resourceSearch]);
+
+  const filteredDonors = useMemo(() => {
+    return donors.filter(d => {
+      if (bloodSearchGroup !== 'All' && d.bloodGroup !== bloodSearchGroup) return false;
+      return true;
+    });
+  }, [donors, bloodSearchGroup]);
+
+  const filteredVolunteers = useMemo(() => {
+    return volunteers.filter(v => {
+      if (volunteerSearch.trim()) {
+        const query = volunteerSearch.toLowerCase();
+        const nameMatch = v.name.toLowerCase().includes(query);
+        const skillMatch = v.skills.some(s => s.toLowerCase().includes(query));
+        const areaMatch = v.serviceArea.toLowerCase().includes(query);
+        return nameMatch || skillMatch || areaMatch;
+      }
+      return true;
+    });
+  }, [volunteers, volunteerSearch]);
+
+  // Find Smart matches for active selected detail items
+  const getSmartMatches = (item) => {
+    if (item.type !== 'request') return [];
+    return listings.filter(x => 
+      x.type === 'offer' && 
+      x.category === item.category && 
+      x.status !== 'resolved'
+    );
+  };
+
+  return (
+    <div className="flex flex-column min-h-screen">
+      
+      {/* 📡 Offline Mesh Banner */}
+      <div className={`mesh-banner ${meshMode ? 'active' : ''}`}>
+        <span className="flex align-center gap-sm" style={{ animation: 'pulse-warning 1.5s infinite' }}>
+          <i data-lucide="wifi-off" style={{ width: '16px', height: '16px' }}></i>
+          <strong>Offline Mesh Network Mode Active</strong> — Operating via local Bluetooth & Wi-Fi direct peers
+        </span>
+        {syncProgress === null ? (
+          <button className="mesh-sync-btn" onClick={runPeerSync}>Sync Peer Nodes</button>
+        ) : (
+          <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '11px' }}>Syncing: {syncProgress}%</span>
+            <div style={{ width: '80px', height: '6px', background: 'rgba(255,255,255,0.2)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ width: `${syncProgress}%`, height: '100%', background: '#fff' }}></div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Header navbar */}
+      <header className="header-nav flex align-center">
+        <div className="container nav-container flex align-center justify-between" style={{ width: '100%' }}>
+          <a href="#home" className="logo" onClick={() => setCurrentView('#home')}>
+            <i data-lucide="shield-alert" className="logo-icon"></i>
+            <div className="logo-text">Emergency<span>Connect</span></div>
+          </a>
+          
+          <nav className="desktop-only">
+            <ul className="nav-links flex">
+              <li><a href="#home" className={currentView === '#home' ? 'active' : ''}>Home</a></li>
+              <li><a href="#dashboard" className={currentView === '#dashboard' ? 'active' : ''}>Dashboard</a></li>
+              <li><a href="#resources" className={currentView === '#resources' ? 'active' : ''}>Resources</a></li>
+              <li><a href="#blood" className={currentView === '#blood' ? 'active' : ''}>Blood Registry</a></li>
+              <li><a href="#volunteers" className={currentView === '#volunteers' ? 'active' : ''}>Volunteers</a></li>
+            </ul>
+          </nav>
+
+          {/* Quick Header Actions */}
+          <div className="flex align-center gap-sm">
+            
+            {/* Indian City Search (India Wide Map Search Feature) */}
+            <form onSubmit={handleCitySearch} className="flex align-center gap-xs desktop-only" style={{ marginRight: '10px' }}>
+              <div style={{ position: 'relative' }}>
+                <input 
+                  type="text" 
+                  placeholder="Search city in India (e.g. Delhi, Mumbai...)" 
+                  className="form-input" 
+                  style={{ width: '280px', paddingRight: '30px', fontSize: '12px', height: '36px' }}
+                  value={citySearchInput} 
+                  onChange={(e) => setCitySearchInput(e.target.value)}
+                />
+                <button type="submit" style={{ position: 'absolute', right: '10px', top: '10px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                  <i data-lucide="search" style={{ width: '16px', height: '16px' }}></i>
+                </button>
+              </div>
+            </form>
+
+            <button 
+              className={`btn-icon-only ${meshMode ? 'mesh-toggle-active' : ''}`}
+              title="Toggle Offline Mesh Link Mode" 
+              onClick={handleMeshToggle}
+            >
+              <i data-lucide={meshMode ? "wifi-off" : "wifi"}></i>
+            </button>
+            <button className="btn-icon-only" onClick={toggleTheme} title="Toggle Theme">
+              <i data-lucide={theme === 'dark' ? "sun" : "moon"}></i>
+            </button>
+            
+            {currentUser ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="user-profile desktop-only">{currentUser.name} ({currentUser.role})</span>
+                <button className="btn btn-secondary" onClick={() => { setCurrentUser(null); localStorage.removeItem('currentUser'); showToast('Signed Out', 'Signed out from administrator session.', 'info'); }} style={{ padding: '6px 12px', fontSize: '12px' }}>
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <button className="btn btn-secondary desktop-only" onClick={() => setIsAuthOpen(true)}>
+                <i data-lucide="user"></i> Sign In
+              </button>
+            )}
+
+            <button className="btn btn-sos" onClick={() => setIsSosOpen(true)}>
+              <i data-lucide="alert-octagon"></i> SOS
+            </button>
+
+            <button className="btn-icon-only hamburger-menu-btn" onClick={() => setMobileNavOpen(true)}>
+              <i data-lucide="menu"></i>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Body Render Panel */}
+      <main className="flex-grow-1" style={{ paddingTop: '80px' }}>
+        
+        {/* --- VIEW: HOME (Landing Page with Leaflet Map) --- */}
+        <section id="home-view" className={`page-view ${currentView === '#home' ? 'active' : ''}`}>
+          
+          {/* Mobile search bar */}
+          <div className="container mobile-only" style={{ padding: '15px' }}>
+            <form onSubmit={handleCitySearch} className="flex gap-sm">
+              <input 
+                type="text" 
+                placeholder="Search city in India (e.g. Pune, Delhi...)" 
+                className="form-input" 
+                style={{ flex: 1 }}
+                value={citySearchInput} 
+                onChange={(e) => setCitySearchInput(e.target.value)}
+              />
+              <button type="submit" className="btn btn-primary"><i data-lucide="search"></i></button>
+            </form>
+          </div>
+
+          <div className="hero-section text-center">
+            <div className="container hero-container" style={{ maxWidth: '800px' }}>
+              <span className="badge badge-low" style={{ marginBottom: '16px', textTransform: 'uppercase' }}>🇮🇳 India Disaster Resilience Track</span>
+              <h1 className="hero-title">Emergency Resource Mapping & P2P Mesh Linking</h1>
+              <p className="hero-subtitle">
+                A localized disaster platform configured to run dynamically across any Indian city. Coordinate volunteer logs, search blood compatibility groups, and bridge critical requests.
+              </p>
+              <div className="flex justify-center gap-sm">
+                <a href="#resources" className="btn btn-primary" style={{ padding: '14px 28px', fontSize: '15px' }}>
+                  Explore Resources Directory
+                </a>
+                <button className="btn btn-success" onClick={() => setIsAddResourceOpen(true)} style={{ padding: '14px 28px', fontSize: '15px' }}>
+                  Offer Assistance
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Map Section */}
+          <div className="container" style={{ marginBottom: '40px' }}>
+            <div style={{ position: 'relative', height: '480px', borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-md)' }}>
+              
+              {/* Actual Map Target */}
+              <div ref={mapContainerRef} style={{ width: '100%', height: '100%', zIndex: 10 }}></div>
+
+              {/* Heatmap Layer Control */}
+              <button 
+                className={`map-heatmap-toggle ${heatmapActive ? 'mesh-toggle-active' : ''}`}
+                onClick={() => setHeatmapActive(!heatmapActive)}
+              >
+                <i data-lucide="flame"></i> Distress Hotspots Map
+              </button>
+
+              {/* Overlay display details */}
+              <div style={{ position: 'absolute', top: '15px', right: '15px', padding: '10px 14px', borderRadius: '8px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', zIndex: 500, fontSize: '12px', boxShadow: 'var(--shadow-md)' }}>
+                <strong>📍 Active Jurisdiction:</strong> {city}
+              </div>
+            </div>
+
+            {/* Quick Stats Banner */}
+            <div className="grid grid-3" style={{ marginTop: '20px', gap: '15px' }}>
+              <div className="stat-card glass-card flex align-center gap-md" style={{ padding: '20px' }}>
+                <div className="stat-icon red" style={{ width: '48px', height: '48px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyCenter: 'center' }}>
+                  <i data-lucide="alert-circle" style={{ color: 'var(--color-danger)' }}></i>
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '24px', fontWeight: '800' }}>{stats.activeRequests}</h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Distress Requests Pending</p>
+                </div>
+              </div>
+              <div className="stat-card glass-card flex align-center gap-md" style={{ padding: '20px' }}>
+                <div className="stat-icon green">
+                  <i data-lucide="check-square" style={{ color: 'var(--color-success)' }}></i>
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '24px', fontWeight: '800' }}>{stats.resourcesAvailable}</h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Resource Offers Staged</p>
+                </div>
+              </div>
+              <div className="stat-card glass-card flex align-center gap-md" style={{ padding: '20px' }}>
+                <div className="stat-icon blue">
+                  <i data-lucide="users" style={{ color: 'var(--color-primary)' }}></i>
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '24px', fontWeight: '800' }}>{stats.volunteersOnline}</h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Rescuers Linked via Mesh</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Categories Index Grid */}
+          <div className="container" style={{ paddingBottom: '60px' }}>
+            <h2 className="text-center" style={{ fontSize: '24px', fontWeight: '700', marginBottom: '8px' }}>Emergency Resource Dispatcher</h2>
+            <p className="text-center" style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '30px' }}>Categories for indexing disaster response nodes.</p>
+            <div className="grid grid-4" style={{ gap: '15px' }}>
+              {[
+                { title: 'Blood Donors', icon: 'droplet', desc: 'Find active matches', href: '#blood' },
+                { title: 'Medical Kits', icon: 'pill', desc: 'Staged medications', href: '#resources' },
+                { title: 'Food & Water', icon: 'shopping-bag', desc: 'Hot meal staging', href: '#resources' },
+                { title: 'Emergency Transports', icon: 'truck', desc: '4x4 flood passage vehicles', href: '#resources' }
+              ].map((c, i) => (
+                <a key={i} href={c.href} className="category-card glass-card" style={{ display: 'block', padding: '20px', borderRadius: '12px', textDecoration: 'none', color: 'inherit' }}>
+                  <div className="category-card-icon" style={{ marginBottom: '12px', color: 'var(--color-primary)' }}>
+                    <i data-lucide={c.icon}></i>
+                  </div>
+                  <h4 style={{ fontWeight: '700', fontSize: '16px' }}>{c.title}</h4>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{c.desc}</p>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* --- VIEW: DASHBOARD (Unified Console Logs & Activities) --- */}
+        <section id="dashboard-view" className={`page-view ${currentView === '#dashboard' ? 'active' : ''}`}>
+          <div className="container" style={{ padding: '30px 0' }}>
+            <h1 style={{ fontSize: '32px', marginBottom: '12px' }}>Incident Command Console</h1>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>Unified monitoring console for regional operations centered in {city}.</p>
+            
+            <div className="grid grid-3" style={{ gap: '20px', alignItems: 'start' }}>
+              
+              {/* Left Column: Recent Activity Logs */}
+              <div className="glass-card" style={{ gridColumn: 'span 2', padding: '24px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '15px' }} className="flex align-center gap-xs">
+                  <i data-lucide="terminal"></i> Match Engine Activity Logs
+                </h3>
+                <div style={{ maxHeight: '420px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {activities.map((a, i) => (
+                    <div key={i} style={{ padding: '12px 16px', background: 'var(--bg-card-hover)', borderLeft: `4px solid ${a.type === 'sos_alert' ? 'var(--color-danger)' : a.type === 'match_found' ? 'var(--color-success)' : 'var(--color-primary)'}`, borderRadius: '4px' }}>
+                      <div className="flex justify-between" style={{ marginBottom: '4px' }}>
+                        <strong>{a.title}</strong>
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{new Date(a.timestamp).toLocaleTimeString()}</span>
+                      </div>
+                      <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{a.message}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Right Column: Dynamic Statistics widgets */}
+              <div className="glass-card" style={{ padding: '24px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '15px' }}>Regional Metrics</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  {[
+                    { label: 'Lives Safely Evacuated', val: stats.savedLives, color: 'var(--color-success)' },
+                    { label: 'Unresolved Emergencies', val: stats.activeRequests, color: 'var(--color-danger)' },
+                    { label: 'Volunteers Dispatched', val: volunteers.filter(x => x.availability === 'busy').length, color: 'var(--color-primary)' }
+                  ].map((stat, i) => (
+                    <div key={i} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{stat.label}</span>
+                      <h4 style={{ fontSize: '26px', fontWeight: '800', color: stat.color, margin: '4px 0' }}>{stat.val}</h4>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
+        {/* --- VIEW: RESOURCES (Public Directory with Match Suggestion) --- */}
+        <section id="resources-view" className={`page-view ${currentView === '#resources' ? 'active' : ''}`}>
+          <div className="container" style={{ padding: '30px 0' }}>
+            <div className="flex justify-between align-center" style={{ marginBottom: '24px' }}>
+              <div>
+                <h1 style={{ fontSize: '30px' }}>Public Aid Directory</h1>
+                <p style={{ color: 'var(--text-muted)' }}>Distributing and requesting emergency supplies in {city}</p>
+              </div>
+              <div className="flex gap-sm">
+                <button className="btn btn-primary" onClick={() => setIsAddResourceOpen(true)}>
+                  <i data-lucide="plus-circle"></i> File Request / Offer
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar & Tabs */}
+            <div className="glass-card" style={{ padding: '20px', marginBottom: '20px' }}>
+              <div className="flex justify-between align-center flex-wrap gap-md">
+                
+                {/* Search Bar */}
+                <div style={{ position: 'relative', minWidth: '280px' }}>
+                  <input 
+                    type="text" 
+                    placeholder="Search resources by neighborhood..." 
+                    className="form-input" 
+                    value={resourceSearch}
+                    onChange={(e) => setResourceSearch(e.target.value)}
+                  />
+                </div>
+
+                {/* Tabs */}
+                <div className="flex gap-sm">
+                  {['all', 'request', 'offer'].map(tab => (
+                    <button 
+                      key={tab} 
+                      className={`btn ${resourceTab === tab ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ textTransform: 'capitalize', padding: '8px 16px' }}
+                      onClick={() => setResourceTab(tab)}
+                    >
+                      {tab}s
+                    </button>
+                  ))}
+                </div>
+
+                {/* Category selector */}
+                <select 
+                  className="form-input" 
+                  value={resourceCategory} 
+                  onChange={(e) => setResourceCategory(e.target.value)}
+                  style={{ width: '180px' }}
+                >
+                  <option value="All">All Categories</option>
+                  <option value="Food Packets">Food & Water</option>
+                  <option value="Medical Equipment">Medical Supplies</option>
+                  <option value="Medicines">Medicines</option>
+                  <option value="Emergency Transport">Emergency Transport</option>
+                  <option value="Temporary Shelter">Temporary Shelter</option>
+                  <option value="Volunteers">Volunteers Needed</option>
+                </select>
+
+              </div>
+            </div>
+
+            {/* Listings Grid */}
+            <div className="grid grid-3" style={{ gap: '15px' }}>
+              {filteredListings.map((item) => {
+                const isRequest = item.type === 'request';
+                const smartMatches = getSmartMatches(item);
+
+                return (
+                  <div key={item.id} className="listing-card glass-card flex flex-column justify-between" style={{ padding: '20px', borderLeft: `4px solid ${isRequest ? 'var(--color-danger)' : 'var(--color-success)'}` }}>
+                    <div>
+                      <div className="flex justify-between" style={{ marginBottom: '8px' }}>
+                        <span className="badge" style={{ background: isRequest ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)', color: isRequest ? 'var(--color-danger)' : 'var(--color-success)' }}>
+                          {item.category}
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {item.urgency.toUpperCase()}
+                        </span>
+                      </div>
+                      
+                      <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '8px' }}>{item.title}</h3>
+                      <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '12px' }}>{item.description}</p>
+                      
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                        📍 {item.location.address}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                        📞 {item.contact}
+                      </div>
+                    </div>
+
+                    <div>
+                      {item.status === 'resolved' ? (
+                        <div style={{ fontSize: '12px', color: 'var(--color-success)', fontWeight: '700', padding: '6px 0' }}>✓ Handled & Resolved</div>
+                      ) : (
+                        <div className="smart-match-container">
+                          {isRequest && smartMatches.length > 0 && (
+                            <div style={{ marginTop: '10px' }}>
+                              <h5 style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-success)', marginBottom: '6px' }}>🤖 Smart Match Suggested</h5>
+                              {smartMatches.slice(0, 1).map(match => (
+                                <div key={match.id} className="match-card flex align-center justify-between" style={{ padding: '8px 12px', borderRadius: '4px', background: 'var(--bg-card-hover)', border: '1px dashed var(--color-success)' }}>
+                                  <div style={{ fontSize: '11px' }}>
+                                    <strong>{match.contact.split('(')[1]?.replace(')', '') || 'Provider'}</strong>
+                                    <div style={{ color: 'var(--text-muted)' }}>Staged: {match.location.address.split(',')[0]}</div>
+                                  </div>
+                                  <button className="btn btn-success" onClick={() => handleSmartMatch(item.id, match.id)} style={{ padding: '4px 8px', fontSize: '10px' }}>
+                                    Match
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ width: '100%', marginTop: '10px', fontSize: '12px' }}
+                            onClick={() => handleCoordinateRoute(item.id, item.title, item.contact, [item.location.lat, item.location.lng])}
+                          >
+                            Coordinate Logistics
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+          </div>
+        </section>
+
+        {/* --- VIEW: BLOOD REGISTRY (Compatible matching widgets) --- */}
+        <section id="blood-view" className={`page-view ${currentView === '#blood' ? 'active' : ''}`}>
+          <div className="container" style={{ padding: '30px 0' }}>
+            <h1 style={{ fontSize: '30px', marginBottom: '8px' }}>Blood Donor Registry</h1>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Search and compatibility matching for blood donors in {city}</p>
+
+            <div className="grid grid-3" style={{ gap: '20px', alignItems: 'start' }}>
+              
+              {/* Left Column: Filter and compatibility tool */}
+              <div className="glass-card" style={{ padding: '24px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '15px' }}>Compatibility Engine</h3>
+                <div className="form-group">
+                  <label className="form-label">Search Target Blood Group</label>
+                  <select 
+                    className="form-input" 
+                    value={bloodSearchGroup} 
+                    onChange={(e) => setBloodSearchGroup(e.target.value)}
+                  >
+                    <option value="All">All Groups</option>
+                    <option value="O-">O- (Universal)</option>
+                    <option value="O+">O+</option>
+                    <option value="A+">A+</option>
+                    <option value="B+">B+</option>
+                    <option value="AB-">AB-</option>
+                  </select>
+                </div>
+                <div style={{ padding: '12px', background: 'var(--bg-card-hover)', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                  <strong>💡 O-Negative (O-)</strong> is compatible with all recipient groups, making it the universal choice for emergency accident trauma dispatch.
+                </div>
+              </div>
+
+              {/* Right Column: Listing results */}
+              <div className="glass-card" style={{ gridColumn: 'span 2', padding: '24px' }}>
+                <h3 style={{ fontSize: '18px', fontWeight: '700', marginBottom: '15px' }}>Compatible Registered Donors ({city})</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {filteredDonors.map((d) => (
+                    <div key={d.id} className="flex align-center justify-between" style={{ padding: '16px', background: 'var(--bg-card-hover)', borderRadius: '6px' }}>
+                      <div className="flex align-center gap-md">
+                        <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.15)', color: 'var(--color-danger)', display: 'flex', alignItems: 'center', justifyCenter: 'center', fontWeight: '800', fontSize: '15px' }} className="flex align-center justify-center">
+                          {d.bloodGroup}
+                        </div>
+                        <div>
+                          <h4 style={{ fontSize: '14px', fontWeight: '700' }}>{d.name}</h4>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>📍 Sector: {d.location}</span>
+                        </div>
+                      </div>
+                      <div className="flex align-center gap-sm">
+                        <span style={{ fontSize: '11px', color: d.available ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                          {d.available ? '● Available' : '● Ineligible'}
+                        </span>
+                        <button 
+                          className="btn btn-primary" 
+                          disabled={!d.available}
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
+                          onClick={() => handleCoordinateRoute(d.id, d.name, d.phone, [d.lat, d.lng])}
+                        >
+                          Dispatch Request
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
+        {/* --- VIEW: VOLUNTEERS (Rescuer Grid & Dispatches) --- */}
+        <section id="volunteers-view" className={`page-view ${currentView === '#volunteers' ? 'active' : ''}`}>
+          <div className="container" style={{ padding: '30px 0' }}>
+            <div className="flex justify-between align-center" style={{ marginBottom: '24px' }}>
+              <div>
+                <h1 style={{ fontSize: '30px' }}>Rescuer Mesh Network</h1>
+                <p style={{ color: 'var(--text-muted)' }}>Registered disaster response volunteers online in {city}</p>
+              </div>
+              <button className="btn btn-primary" onClick={() => setIsAddVolunteerOpen(true)}>
+                <i data-lucide="user-plus"></i> Register as Volunteer
+              </button>
+            </div>
+
+            {/* Filter Search */}
+            <div className="glass-card" style={{ padding: '16px', marginBottom: '20px' }}>
+              <input 
+                type="text" 
+                placeholder="Search rescuers by skill or coverage area..." 
+                className="form-input" 
+                value={volunteerSearch}
+                onChange={(e) => setVolunteerSearch(e.target.value)}
+              />
+            </div>
+
+            {/* Grid display */}
+            <div className="grid grid-4" style={{ gap: '15px' }}>
+              {filteredVolunteers.map((v) => (
+                <div key={v.id} className="glass-card flex flex-column justify-between" style={{ padding: '20px' }}>
+                  <div>
+                    <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '6px' }}>{v.name}</h3>
+                    <span style={{ fontSize: '11px', color: 'var(--color-primary)', display: 'block', marginBottom: '12px' }}>
+                      📍 Coverage: {v.serviceArea.split(',')[0]}
+                    </span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '15px' }}>
+                      {v.skills.map((s, i) => (
+                        <span key={i} style={{ fontSize: '10px', padding: '2px 6px', background: 'var(--bg-card-hover)', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <button 
+                      className="btn btn-secondary" 
+                      style={{ width: '100%', fontSize: '12px' }}
+                      onClick={() => handleCoordinateRoute(v.id, v.name, v.contact, [v.lat, v.lng])}
+                    >
+                      Dispatch Node
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+          </div>
+        </section>
+
+      </main>
+
+      {/* Footer */}
+      <footer style={{ marginTop: 'auto', padding: '30px 0', borderTop: '1px solid var(--border-color)', background: 'var(--bg-card)' }}>
+        <div className="container flex justify-between align-center flex-wrap gap-md" style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+          <div>
+            <strong>Emergency Connect</strong> — Built for Hackathon (Disaster Resilience Track).
+          </div>
+          <div>
+            🇮🇳 Running localized centered in: <strong>{city}</strong>
+          </div>
+        </div>
+      </footer>
+
+      {/* --- MODAL: Add Resource / Staging --- */}
+      {isAddResourceOpen && (
+        <div className="modal-backdrop active">
+          <div className="modal-container glass-card" style={{ padding: '0', background: 'var(--bg-card)' }}>
+            <div className="modal-header flex justify-between align-center" style={{ padding: '20px', borderBottom: '1px solid var(--border-color)' }}>
+              <h3 style={{ fontWeight: '700', fontSize: '18px' }}>Publish Item / Staging Offer</h3>
+              <button className="btn-icon-only" onClick={() => setIsAddResourceOpen(false)} style={{ background: 'none', border: 'none' }}><i data-lucide="x"></i></button>
+            </div>
+            <form onSubmit={handleAddResourceSubmit}>
+              <div className="modal-body" style={{ padding: '20px', maxH: '450px', overflowY: 'auto' }}>
+                
+                <div className="form-group">
+                  <label className="form-label">Resource Staging Title</label>
+                  <input type="text" name="title" className="form-input" required placeholder="e.g. 5 Oxygen Concentrators Staged" />
+                </div>
+
+                <div className="grid grid-2" style={{ gap: '15px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Type</label>
+                    <select name="type" className="form-input">
+                      <option value="request">Request Aid</option>
+                      <option value="offer">Staging Offer</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Category</label>
+                    <select name="category" className="form-input">
+                      <option value="Food Packets">Food & Water</option>
+                      <option value="Medical Equipment">Medical Supplies</option>
+                      <option value="Medicines">Medicines</option>
+                      <option value="Emergency Transport">Emergency Transport</option>
+                      <option value="Temporary Shelter">Temporary Shelter</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-2" style={{ gap: '15px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Quantity</label>
+                    <input type="number" name="qty" className="form-input" min="1" defaultValue="1" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Urgency</label>
+                    <select name="urgency" className="form-input">
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Local Address Sector / LandMark</label>
+                  <input type="text" name="address" className="form-input" required placeholder={`e.g. MP Nagar, ${city.split(',')[0]}`} />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Emergency Callback Contacts</label>
+                  <input type="text" name="contact" className="form-input" required placeholder="e.g. +91 99887 76655 (NGO Team)" />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Additional Instructions</label>
+                  <textarea name="desc" className="form-input" style={{ height: '70px' }} placeholder="Include specific instructions for coordination..."></textarea>
+                </div>
+
+              </div>
+              <div className="modal-footer flex justify-end gap-sm" style={{ padding: '20px', borderTop: '1px solid var(--border-color)' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsAddResourceOpen(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">Publish to Directory</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: Register Volunteer Node --- */}
+      {isAddVolunteerOpen && (
+        <div className="modal-backdrop active">
+          <div className="modal-container glass-card" style={{ padding: '0', background: 'var(--bg-card)' }}>
+            <div className="modal-header flex justify-between align-center" style={{ padding: '20px', borderBottom: '1px solid var(--border-color)' }}>
+              <h3 style={{ fontWeight: '700', fontSize: '18px' }}>Register Responder Node</h3>
+              <button className="btn-icon-only" onClick={() => setIsAddVolunteerOpen(false)} style={{ background: 'none', border: 'none' }}><i data-lucide="x"></i></button>
+            </div>
+            <form onSubmit={handleAddVolunteerSubmit}>
+              <div className="modal-body" style={{ padding: '20px' }}>
+                <div className="form-group">
+                  <label className="form-label">Full Name</label>
+                  <input type="text" name="name" className="form-input" required placeholder="e.g. Vikram Rawat" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Contact Phone</label>
+                  <input type="text" name="phone" className="form-input" required placeholder="e.g. +91 99887 76655" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Service Coverage Sector</label>
+                  <input type="text" name="area" className="form-input" required placeholder={`e.g. Kolar Road, ${city.split(',')[0]}`} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ marginBottom: '10px', display: 'block' }}>Response Capabilities</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    {['First Aid', 'Search & Rescue', 'Logistics', 'Water Evacuation', 'Medical Help'].map((skill, i) => (
+                      <label key={i} className="flex align-center gap-xs" style={{ fontSize: '13px', cursor: 'pointer' }}>
+                        <input type="checkbox" className="vol-skill-chk" value={skill} /> {skill}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer flex justify-end gap-sm" style={{ padding: '20px', borderTop: '1px solid var(--border-color)' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsAddVolunteerOpen(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">Publish Responder Node</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: Trigger SOS Distress Beacon --- */}
+      {isSosOpen && (
+        <div className="modal-backdrop active">
+          <div className="modal-container glass-card" style={{ padding: '0', background: 'var(--bg-card)', borderColor: 'var(--color-danger)' }}>
+            <div className="modal-header flex justify-between align-center" style={{ padding: '20px', borderBottom: '1px solid var(--border-color)' }}>
+              <h3 style={{ color: 'var(--color-danger)', fontWeight: '800' }} className="flex align-center gap-xs">
+                <i data-lucide="alert-octagon"></i> Broadcast SOS Distress Beacon
+              </h3>
+              <button className="btn-icon-only" onClick={() => setIsSosOpen(false)} style={{ background: 'none', border: 'none' }}><i data-lucide="x"></i></button>
+            </div>
+            <form onSubmit={handleSosConfirm}>
+              <div className="modal-body" style={{ padding: '20px' }}>
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '15px' }}>
+                  This will broadcast a high-priority distress SOS signal across all local RF mesh nodes and draw an urgent coordinate marker on the live map.
+                </p>
+                <div className="form-group">
+                  <label className="form-label">Nature of Emergency / Situation</label>
+                  <textarea name="desc" className="form-input" style={{ height: '80px' }} required placeholder="e.g. Stranded on roof due to local flash flooding..."></textarea>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Mobile Contact CallBack</label>
+                  <input type="text" name="phone" className="form-input" required placeholder="e.g. +91 99887 76655" />
+                </div>
+              </div>
+              <div className="modal-footer flex justify-end gap-sm" style={{ padding: '20px', borderTop: '1px solid var(--border-color)' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsSosOpen(false)}>Cancel</button>
+                <button type="submit" className="btn btn-danger">Transmit Distress SOS</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: Admin Auth Sign-In --- */}
+      {isAuthOpen && (
+        <div className="modal-backdrop active">
+          <div className="modal-container glass-card" style={{ padding: '24px', maxWidth: '380px' }}>
+            <div className="flex justify-between align-center" style={{ marginBottom: '15px' }}>
+              <h3 style={{ fontWeight: '700' }}>Admin Auth Gate</h3>
+              <button className="btn-icon-only" onClick={() => setIsAuthOpen(false)} style={{ background: 'none', border: 'none' }}><i data-lucide="x"></i></button>
+            </div>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '15px' }}>
+              Authorizing opens command channels and log resets for regional dispatchers.
+            </p>
+            <button 
+              className="btn btn-primary" 
+              style={{ width: '100%' }}
+              onClick={() => {
+                setCurrentUser({ name: 'Central Dispatch Command', role: 'admin' });
+                localStorage.setItem('currentUser', JSON.stringify({ name: 'Central Dispatch Command', role: 'admin' }));
+                setIsAuthOpen(false);
+                showToast('Authorized Successfully', 'Welcome back, Admin Coordinator.', 'success');
+              }}
+            >
+              Authorize Node as Administrator
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* --- DRAWER: Live Coordination Chat Portal --- */}
+      {activeChat && (
+        <div className="chat-drawer active">
+          <div className="chat-header flex align-center justify-between">
+            <div className="flex align-center gap-sm">
+              <div className="user-avatar" style={{ background: 'var(--color-primary)', width: '38px', height: '38px', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyCenter: 'center', fontWeight: 'bold' }} className="flex align-center justify-center">
+                {activeChat.avatar}
+              </div>
+              <div>
+                <h4 style={{ fontSize: '14px', fontWeight: '700' }}>{activeChat.name}</h4>
+                <p style={{ fontSize: '11px', color: 'var(--color-success)' }}>{activeChat.status}</p>
+              </div>
+            </div>
+            <button className="btn-icon-only" onClick={() => setActiveChat(null)} style={{ background: 'none', border: 'none' }}><i data-lucide="x"></i></button>
+          </div>
+
+          {/* Messages body */}
+          <div className="chat-messages">
+            {(chats[activeChat.recipientId] || []).map((msg, i) => (
+              <div key={i} className={`chat-bubble ${msg.sender === 'sent' ? 'sent' : 'received'}`}>
+                <div>{msg.text}</div>
+                <div className="chat-bubble-time">{msg.time}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Quick Replies Tags */}
+          <div className="chat-quick-replies">
+            {[
+              { emoji: '🚗', txt: 'On my way' },
+              { emoji: '🚒', txt: 'Team dispatched' },
+              { emoji: '📍', txt: 'Confirm coordinates' },
+              { emoji: '📦', txt: 'Aid secured' }
+            ].map((reply, i) => (
+              <span 
+                key={i} 
+                className="chat-quick-tag"
+                onClick={() => sendChatMessage(`${reply.emoji} ${reply.txt}`)}
+              >
+                {reply.emoji} {reply.txt}
+              </span>
+            ))}
+          </div>
+
+          {/* Custom Input */}
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              const inp = e.target.elements.message;
+              if (inp.value.trim()) {
+                sendChatMessage(inp.value);
+                inp.value = '';
+              }
+            }}
+            className="chat-input-area"
+          >
+            <input 
+              type="text" 
+              name="message" 
+              className="form-input" 
+              style={{ flex: 1 }} 
+              placeholder="Type message on peer grid..." 
+              autoComplete="off" 
+            />
+            <button type="submit" className="btn btn-primary"><i data-lucide="send"></i></button>
+          </form>
+        </div>
+      )}
+
+      {/* --- DRAWER: Mobile Navigation slide-out --- */}
+      <div className={`mobile-nav-backdrop ${mobileNavOpen ? 'active' : ''}`} onClick={() => setMobileNavOpen(false)}></div>
+      <div className={`mobile-nav-drawer ${mobileNavOpen ? 'active' : ''}`}>
+        <div className="flex align-center justify-between" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '20px', marginBottom: '20px' }}>
+          <div className="logo">
+            <i data-lucide="shield-alert" className="logo-icon"></i>
+            <div className="logo-text">Emergency<span>Connect</span></div>
+          </div>
+          <button className="btn-icon-only" onClick={() => setMobileNavOpen(false)} style={{ background: 'none', border: 'none' }}><i data-lucide="x"></i></button>
+        </div>
+        <ul className="mobile-links">
+          {['Home', 'Dashboard', 'Resources', 'Blood Registry', 'Volunteers'].map((view) => {
+            const h = `#${view.toLowerCase().replace(' ', '')}`;
+            return (
+              <li key={view}>
+                <a 
+                  href={h} 
+                  className={currentView === h ? 'active' : ''}
+                  onClick={() => { setCurrentView(h); setMobileNavOpen(false); }}
+                >
+                  {view}
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px', marginTop: 'auto' }}>
+          <button className="btn btn-sos" style={{ width: '100%' }} onClick={() => { setMobileNavOpen(false); setIsSosOpen(true); }}>
+            <i data-lucide="alert-octagon"></i> SOS Emergency
+          </button>
+        </div>
+      </div>
+
+      {/* --- Toast Overlay Notifications container --- */}
+      <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {toasts.map((toast) => (
+          <div key={toast.id} className="glass-card" style={{ 
+            padding: '12px 18px', 
+            borderRadius: '8px', 
+            minWidth: '240px', 
+            maxWidth: '320px', 
+            boxShadow: '0 10px 25px rgba(0,0,0,0.2)', 
+            borderLeft: `4px solid ${
+              toast.type === 'success' ? 'var(--color-success)' : 
+              toast.type === 'warning' ? 'var(--color-warning)' : 
+              toast.type === 'danger' ? 'var(--color-danger)' : 'var(--color-primary)'
+            }`,
+            background: 'var(--bg-card)',
+            animation: 'mesh-slide-down 0.2s ease-out'
+          }}>
+            <h5 style={{ fontWeight: '700', fontSize: '13px', marginBottom: '2px' }}>{toast.title}</h5>
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{toast.message}</p>
+          </div>
+        ))}
+      </div>
+
+    </div>
+  );
+}
+
+// Render the application to DOM
+const container = document.getElementById('root');
+const root = ReactDOM.createRoot(container);
+root.render(<App />);
