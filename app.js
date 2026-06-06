@@ -1505,7 +1505,33 @@ function App() {
             );
           })}
         </ul>
-        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px', marginTop: 'auto' }}>
+        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px', marginTop: 'auto' }} className="flex flex-column gap-sm">
+          {currentUser ? (
+            <div className="flex flex-column gap-xs" style={{ marginBottom: '10px' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-main)', fontWeight: '600' }}>👤 {currentUser.name}</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>Role: Coordinator</span>
+              <button 
+                className="btn btn-secondary" 
+                style={{ width: '100%', padding: '8px 12px', fontSize: '12px' }}
+                onClick={() => { 
+                  setCurrentUser(null); 
+                  localStorage.removeItem('currentUser'); 
+                  setMobileNavOpen(false);
+                  showToast('Signed Out', 'Signed out from administrator session.', 'info'); 
+                }}
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <button 
+              className="btn btn-secondary" 
+              style={{ width: '100%', marginBottom: '10px', padding: '10px 14px', fontSize: '13px' }}
+              onClick={() => { setMobileNavOpen(false); setIsAuthOpen(true); }}
+            >
+              <i data-lucide="user"></i> Sign In
+            </button>
+          )}
           <button className="btn btn-sos" style={{ width: '100%' }} onClick={() => { setMobileNavOpen(false); setIsSosOpen(true); }}>
             <i data-lucide="alert-octagon"></i> SOS Emergency
           </button>
